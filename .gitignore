@@ -1,1 +1,4 @@
-./personpath22/*
+*.mp4
+*.json
+*.zip
+*pyc
