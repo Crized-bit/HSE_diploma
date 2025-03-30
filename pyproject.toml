@@ -1,0 +1,12 @@
+[project]
+name = "yolov5_motion"
+version = "0.0.1"
+description = "Custom YOLOv5 for motion detection"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["yolov5_motion"]  # Явно указываем имя пакета
+package-dir = {"" = "src"}
