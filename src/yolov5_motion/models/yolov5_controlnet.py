@@ -29,6 +29,8 @@ class YOLOv5WithControlNet(nn.Module):
         # Initialize YOLOv5 base model
         self.yolo = YOLOv5Model(cfg, ch=ch, nc=nc, anchors=anchors)
 
+        # self.yolo.nc = nc  # attach number of classes to model
+
         # Initialize ControlNet with the YOLOv5 model
         self.controlnet = ControlNetModel(self.yolo)
 

@@ -37,7 +37,7 @@ def main():
 
     # Dataset and dataloader options
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size for dataloaders")
-    parser.add_argument("--num_workers", type=int, default=4, help="Number of workers for data loading")
+    parser.add_argument("--num_workers", type=int, default=8, help="Number of workers for data loading")
     parser.add_argument("--val_ratio", type=float, default=0.1, help="Ratio of training data to use for validation")
 
     # Visualization options
@@ -47,7 +47,7 @@ def main():
     args = parser.parse_args()
 
     # Step 1: Preprocess videos if not skipped
-    if not args.skip_preprocessing:
+    if not True:
         print("\n===== Preprocessing Videos =====")
         start_time = time.time()
         preprocess_videos(

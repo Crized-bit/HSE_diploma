@@ -1,0 +1,901 @@
+import argparse
+import time
+import os
+import sys
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from pathlib import Path
+from torch.utils.tensorboard import SummaryWriter
+import numpy as np
+import yaml
+import json
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+import cv2
+from matplotlib.figure import Figure
+from datetime import datetime
+
+# Add YOLOv5 directory to path to import YOLOv5 modules
+yolov5_dir = "/home/jovyan/p.kudrevatyh/yolov5"
+if os.path.exists(yolov5_dir):
+    sys.path.append(yolov5_dir)
+    print(f"Added YOLOv5 directory to path: {yolov5_dir}")
+else:
+    print(f"Warning: YOLOv5 directory not found at {yolov5_dir}")
+
+# Import YOLOv5 modules for loss computation and bounding box processing
+try:
+    from utils.loss import ComputeLoss
+    from utils.general import non_max_suppression, scale_boxes
+
+    print("Successfully imported YOLOv5 loss computation modules")
+except ImportError as e:
+    print(f"Warning: Could not import YOLOv5 modules: {e}")
+    # print("Will use placeholder loss function instead")
+
+# Import custom modules
+from yolov5_motion.models.yolov5_controlnet import create_combined_model
+from yolov5_motion.data.dataset_splits import create_dataset_splits, get_dataloaders
+
+# Try to import Prodigy optimizer if available
+try:
+    from prodigyopt import Prodigy
+
+    PRODIGY_AVAILABLE = True
+except ImportError:
+    PRODIGY_AVAILABLE = False
+    print("Prodigy optimizer not available. Will use Adam instead.")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train YOLOv5 with ControlNet for Motion")
+
+    # Input directories
+    parser.add_argument("--preprocessed_dir", type=str, required=True, help="Directory containing preprocessed frames")
+    parser.add_argument("--annotations_dir", type=str, required=True, help="Directory containing annotation files")
+    parser.add_argument("--splits_file", type=str, required=True, help="Path to splits JSON file")
+
+    # Output directories
+    parser.add_argument("--output_dir", type=str, default="./output", help="Directory to save model checkpoints and logs")
+
+    # Model configuration
+    parser.add_argument("--yolo_weights", type=str, default=None, help="Path to YOLOv5 weights (.pt file)")
+    parser.add_argument("--controlnet_weights", type=str, default=None, help="Path to ControlNet weights (.pt file)")
+    parser.add_argument("--yolo_cfg", type=str, default="yolov5m.yaml", help="Path to YOLOv5 model configuration (.yaml file)")
+    parser.add_argument("--img_size", type=int, default=640, help="Input image size")
+    parser.add_argument("--num_classes", type=int, default=80, help="Number of classes in the dataset")
+
+    # Training parameters
+    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
+    parser.add_argument("--val_batch_size", type=int, default=32, help="Batch size for validation")
+    parser.add_argument("--workers", type=int, default=8, help="Number of data loading workers")
+    parser.add_argument("--lr", type=float, default=0.001, help="Initial learning rate")
+    parser.add_argument("--weight_decay", type=float, default=0.0005, help="Weight decay for optimizer")
+    parser.add_argument("--val_ratio", type=float, default=0.1, help="Ratio of training data to use for validation")
+
+    # Training mode
+    parser.add_argument("--train_controlnet_only", action="store_true", help="Train only the ControlNet, freeze YOLOv5 weights")
+
+    # Optimizer selection
+    parser.add_argument("--optimizer", type=str, default="adam", choices=["adam", "sgd", "prodigy"], help="Optimizer to use for training")
+
+    # Saving and logging
+    parser.add_argument("--save_interval", type=int, default=10, help="Interval (in epochs) to save model checkpoints")
+    parser.add_argument("--log_interval", type=int, default=10, help="Interval (in iterations) to log training progress")
+    parser.add_argument("--eval_interval", type=int, default=5, help="Interval (in epochs) to evaluate on validation set")
+
+    # Resume training
+    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume training from")
+
+    # Mixed precision training
+    parser.add_argument(
+        "--precision", type=str, default="fp32", choices=["fp32", "fp16", "bf16"], help="Precision for training (fp32, fp16, or bf16)"
+    )
+
+    # Loss weights
+    parser.add_argument("--box_weight", type=float, default=0.05, help="Weight for box loss")
+    parser.add_argument("--obj_weight", type=float, default=1.0, help="Weight for objectness loss")
+    parser.add_argument("--cls_weight", type=float, default=0.5, help="Weight for class loss")
+
+    return parser.parse_args()
+
+
+class Trainer:
+    def __init__(self, args):
+        self.args = args
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self.device}")
+
+        # Create output directory with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.output_dir = Path(args.output_dir) / timestamp
+        self.checkpoints_dir = self.output_dir / "checkpoints"
+        self.logs_dir = self.output_dir / "logs"
+        self.viz_dir = self.output_dir / "visualizations"
+
+        os.makedirs(self.output_dir, exist_ok=True)
+        os.makedirs(self.checkpoints_dir, exist_ok=True)
+        os.makedirs(self.logs_dir, exist_ok=True)
+        os.makedirs(self.viz_dir, exist_ok=True)
+
+        # Track metrics for plotting
+        self.train_losses = []
+        self.val_losses = []
+        self.train_box_losses = []
+        self.train_obj_losses = []
+        self.train_cls_losses = []
+        self.val_box_losses = []
+        self.val_obj_losses = []
+        self.val_cls_losses = []
+        self.lr_history = []
+
+        # Save the arguments
+        with open(self.output_dir / "args.json", "w") as f:
+            json.dump(vars(args), f, indent=4)
+
+        # Setup tensorboard
+        self.writer = SummaryWriter(log_dir=str(self.logs_dir))
+
+        # Save the arguments
+        with open(self.output_dir / "args.json", "w") as f:
+            json.dump(vars(args), f, indent=4)
+
+        # Load model
+        print("Creating model...")
+        self.model = create_combined_model(
+            cfg=args.yolo_cfg,
+            yolo_weights=args.yolo_weights,
+            controlnet_weights=args.controlnet_weights,
+            img_size=args.img_size,
+            nc=args.num_classes,
+        )
+        self.model = self.model.to(self.device)
+
+        # Initialize loss function if YOLOv5 loss is available
+        try:
+            if hasattr(self.model.yolo, "hyp"):
+                self.compute_loss_fn = ComputeLoss(self.model.yolo)
+            else:
+                # Create default hyperparameters for loss function
+                default_hyp = {
+                    "box": 0.0539,  # box loss gain
+                    "cls": 0.299,  # cls loss gain
+                    "cls_pw": 0.0825,  # cls BCELoss positive_weight
+                    "obj": 0.632,  # obj loss gain
+                    "obj_pw": 1.0,  # obj BCELoss positive_weight
+                    "fl_gamma": 0.0,  # focal loss gamma
+                    "anchor_t": 3.44,  # anchor-multiple threshold
+                }
+                # Set hyperparameters on the model
+                self.model.yolo.hyp = default_hyp
+                self.compute_loss_fn = ComputeLoss(self.model.yolo)
+        except NameError:
+            self.compute_loss_fn = None
+            print("Using placeholder loss function (YOLOv5 loss not available)")
+
+        # Set training mode
+        if args.train_controlnet_only:
+            print("Training ControlNet only - freezing YOLOv5 weights")
+            self.model.train_controlnet()
+        else:
+            print("Training all parameters")
+            self.model.train_all()
+
+        # Create dataloaders
+        print("Creating datasets and dataloaders...")
+        self.datasets = create_dataset_splits(
+            preprocessed_dir=args.preprocessed_dir,
+            annotations_dir=args.annotations_dir,
+            splits_file=args.splits_file,
+            val_ratio=args.val_ratio,
+        )
+
+        self.dataloaders = get_dataloaders(datasets=self.datasets, batch_size=args.batch_size, num_workers=args.workers)
+
+        # Adjust validation batch size separately if specified
+        if args.val_batch_size != args.batch_size:
+            from torch.utils.data import DataLoader
+            from yolov5_motion.data.dataset import collate_fn
+
+            self.dataloaders["val"] = DataLoader(
+                self.datasets["val"],
+                batch_size=args.val_batch_size,
+                shuffle=False,
+                num_workers=args.workers,
+                collate_fn=collate_fn,
+                pin_memory=True,
+            )
+
+        # Setup optimizer
+        self.optimizer = self._create_optimizer()
+
+        # Resume training if specified
+        self.start_epoch = 0
+        if args.resume:
+            self._resume_checkpoint(args.resume)
+
+        # Initialize training variables
+        self.global_step = 0
+        self.best_val_loss = float("inf")
+
+        # Setup precision mode
+        self.precision = args.precision
+        if self.precision == "bf16" and not torch.cuda.is_bf16_supported():
+            print("Warning: BF16 not supported on this device. Falling back to FP32.")
+            self.precision = "fp32"
+
+        print(f"Training with {self.precision} precision")
+
+    def _create_optimizer(self):
+        """Create the optimizer based on the command line arguments"""
+        # Get parameters that require gradients
+        parameters = [p for p in self.model.parameters() if p.requires_grad]
+
+        if self.args.optimizer.lower() == "adam":
+            return optim.Adam(parameters, lr=self.args.lr, weight_decay=self.args.weight_decay)
+        elif self.args.optimizer.lower() == "sgd":
+            return optim.SGD(parameters, lr=self.args.lr, momentum=self.args.momentum, weight_decay=self.args.weight_decay)
+        elif self.args.optimizer.lower() == "prodigy":
+            if not PRODIGY_AVAILABLE:
+                print("Prodigy optimizer requested but not available. Using Adam instead.")
+                return optim.Adam(parameters, lr=self.args.lr, weight_decay=self.args.weight_decay)
+            else:
+                return Prodigy(parameters, lr=self.args.lr, weight_decay=self.args.weight_decay)
+        else:
+            print(f"Unknown optimizer {self.args.optimizer}, using Adam")
+            return optim.Adam(parameters, lr=self.args.lr, weight_decay=self.args.weight_decay)
+
+    def _resume_checkpoint(self, checkpoint_path):
+        """Resume training from a checkpoint"""
+        print(f"Resuming from checkpoint {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+
+        # Load model weights
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+
+        # Load optimizer state
+        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+        # Load other training state
+        self.start_epoch = checkpoint["epoch"] + 1
+        self.global_step = checkpoint["global_step"]
+        self.best_val_loss = checkpoint.get("best_val_loss", float("inf"))
+
+        print(f"Resumed from epoch {checkpoint['epoch']}")
+
+    def save_checkpoint(self, epoch, is_best=False):
+        """Save a checkpoint of the model and training state"""
+        checkpoint = {
+            "epoch": epoch,
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "global_step": self.global_step,
+            "best_val_loss": self.best_val_loss,
+        }
+
+        # Save regular checkpoint
+        checkpoint_path = self.checkpoints_dir / f"checkpoint_epoch_{epoch}.pt"
+        torch.save(checkpoint, checkpoint_path)
+
+        # Save ControlNet weights separately
+        controlnet_path = self.checkpoints_dir / f"controlnet_epoch_{epoch}.pt"
+        self.model.save_controlnet(controlnet_path)
+
+        # Save best model if this is the best
+        if is_best:
+            best_path = self.checkpoints_dir / "best_model.pt"
+            torch.save(checkpoint, best_path)
+
+            best_controlnet_path = self.checkpoints_dir / "best_controlnet.pt"
+            self.model.save_controlnet(best_controlnet_path)
+
+    def compute_loss(self, outputs, targets):
+        """
+        Compute YOLOv5 loss for detection outputs and ground truth targets
+
+        Args:
+            outputs: Model outputs from forward pass
+            targets: Ground truth target annotations
+
+        Returns:
+            (torch.Tensor): Total loss
+            (dict): Loss components (box, obj, cls)
+        """
+        # If YOLOv5 loss is available, use it
+        if self.compute_loss_fn is not None:
+            # Convert targets from our format to YOLOv5 format
+            yolo_targets = self._convert_targets_to_yolo_format(targets).to(self.device)
+
+            # Compute loss
+            loss, loss_items = self.compute_loss_fn(outputs, yolo_targets)
+
+            # Extract individual loss components
+            if isinstance(loss_items, torch.Tensor) and len(loss_items) >= 3:
+                box_loss = loss_items[0]
+                obj_loss = loss_items[1]
+                cls_loss = loss_items[2]
+            else:
+                # Fallback if loss_items is not as expected
+                box_loss = torch.tensor(0.0, device=self.device)
+                obj_loss = torch.tensor(0.0, device=self.device)
+                cls_loss = torch.tensor(0.0, device=self.device)
+
+            # Create metrics dictionary
+            metrics = {"box_loss": box_loss.item(), "obj_loss": obj_loss.item(), "cls_loss": cls_loss.item(), "total_loss": loss.item()}
+
+            return loss, metrics
+        else:
+            # Placeholder loss calculation if YOLOv5 loss is not available
+            box_loss = torch.tensor(0.0, device=self.device)
+            obj_loss = torch.tensor(0.0, device=self.device)
+            cls_loss = torch.tensor(0.0, device=self.device)
+
+            # Weighted sum of losses
+            loss = self.args.box_weight * box_loss + self.args.obj_weight * obj_loss + self.args.cls_weight * cls_loss
+
+            return loss, {"box_loss": box_loss.item(), "obj_loss": obj_loss.item(), "cls_loss": cls_loss.item(), "total_loss": loss.item()}
+
+    def _convert_targets_to_yolo_format(self, targets):
+        """
+        Convert targets from our dataset format to YOLOv5 format
+
+        Args:
+            targets: List of annotation dictionaries
+
+        Returns:
+            torch.Tensor: Tensor with shape [num_targets, 6] where each row is
+                          [batch_idx, class_idx, x, y, w, h]
+        """
+        # Initialize list to hold all target rows
+        all_targets = []
+
+        # Process each batch item
+        for batch_idx, annotations in enumerate(targets):
+            for ann in annotations:
+                # Extract bounding box
+                bbox = torch.tensor(ann["bbox"], dtype=torch.float32)
+
+                # Extract class label
+                # Assuming the first label is the class index
+                class_idx = 0  # Default class index if not specified
+                if "labels" in ann:
+                    if isinstance(ann["labels"], list) and len(ann["labels"]) > 0:
+                        if isinstance(ann["labels"][0], dict) and "id" in ann["labels"][0]:
+                            class_idx = ann["labels"][0]["id"]
+                        elif isinstance(ann["labels"][0], (int, float)):
+                            class_idx = ann["labels"][0]
+
+                # Create target row [batch_idx, class_idx, x, y, w, h]
+                target_row = torch.tensor([batch_idx, class_idx, *bbox], dtype=torch.float32)
+                all_targets.append(target_row)
+
+        # Combine all target rows
+        if all_targets:
+            return torch.stack(all_targets)
+        else:
+            # Return empty tensor with correct shape if no targets
+            return torch.zeros((0, 6), dtype=torch.float32, device=self.device)
+
+    def train_epoch(self, epoch):
+        """Train the model for one epoch"""
+        self.model.train()
+        epoch_loss = 0
+        epoch_metrics = {"box_loss": 0, "obj_loss": 0, "cls_loss": 0}
+
+        pbar = tqdm(self.dataloaders["train"], desc=f"Epoch {epoch+1}/{self.args.epochs}")
+
+        for i, batch in enumerate(pbar):
+            # Get data and move to device
+            current_frames = batch["current_frames"].to(self.device)
+            control_images = batch["control_images"].to(self.device)
+            targets = batch["annotations"]  # List of annotation dictionaries
+
+            # Zero gradients
+            self.optimizer.zero_grad()
+
+            # Forward pass with selected precision
+            if self.precision == "fp16" or self.precision == "bf16":
+                with torch.amp.autocast(device_type="cuda"):
+                    predictions = self.model(current_frames, control_images)
+                    loss, metrics = self.compute_loss(predictions, targets)
+            else:
+                # Regular FP32 forward pass
+                predictions = self.model(current_frames, control_images)
+                loss, metrics = self.compute_loss(predictions, targets)
+
+            # Backward pass (no scaler needed for bf16)
+            loss.backward()
+            self.optimizer.step()
+
+            # Update metrics
+            epoch_loss += loss.item()
+            for k, v in metrics.items():
+                epoch_metrics[k] = epoch_metrics.get(k, 0) + v
+
+            # Update progress bar
+            pbar.set_postfix(
+                {
+                    "loss": f"{loss.item():.4f}",
+                    "box_loss": f"{metrics['box_loss']}",
+                    "obj_loss": f"{metrics['obj_loss']}",
+                    "cls_loss": f"{metrics['cls_loss']}",
+                }
+            )
+
+            # Log metrics at regular intervals
+            if i % self.args.log_interval == 0:
+                # Log to tensorboard
+                self.writer.add_scalar("train/loss", loss.item(), self.global_step)
+                self.writer.add_scalar("train/box_loss", metrics["box_loss"], self.global_step)
+                self.writer.add_scalar("train/obj_loss", metrics["obj_loss"], self.global_step)
+                self.writer.add_scalar("train/cls_loss", metrics["cls_loss"], self.global_step)
+
+                # You can also log learning rate
+                for param_group in self.optimizer.param_groups:
+                    self.writer.add_scalar("train/lr", param_group["lr"], self.global_step)
+
+            self.global_step += 1
+
+        # Compute average metrics for the epoch
+        num_batches = len(self.dataloaders["train"])
+        avg_loss = epoch_loss / num_batches
+        avg_metrics = {k: v / num_batches for k, v in epoch_metrics.items()}
+
+        # Log epoch metrics
+        self.writer.add_scalar("train/epoch_loss", avg_loss, epoch)
+        for k, v in avg_metrics.items():
+            self.writer.add_scalar(f"train/epoch_{k}", v, epoch)
+
+        # Store metrics for plotting
+        self.train_losses.append(avg_loss)
+        self.train_box_losses.append(avg_metrics.get("box_loss", 0))
+        self.train_obj_losses.append(avg_metrics.get("obj_loss", 0))
+        self.train_cls_losses.append(avg_metrics.get("cls_loss", 0))
+        self.lr_history.append(self.optimizer.param_groups[0]["lr"])
+
+        return avg_loss, avg_metrics
+
+    def validate(self, epoch):
+        """Validate the model on the validation set"""
+        self.model.eval()
+        val_loss = 0
+        val_metrics = {"box_loss": 0, "obj_loss": 0, "cls_loss": 0}
+
+        with torch.no_grad():
+            pbar = tqdm(self.dataloaders["val"], desc=f"Validating epoch {epoch+1}")
+
+            for batch in pbar:
+                # Get data and move to device
+                current_frames = batch["current_frames"].to(self.device)
+                control_images = batch["control_images"].to(self.device)
+                targets = batch["annotations"]
+
+                # Forward pass
+                predictions = self.model(current_frames, control_images)
+
+                _, train_output = predictions
+
+                loss, metrics = self.compute_loss(train_output, targets)
+
+                # Update metrics
+                val_loss += loss.item()
+                for k, v in metrics.items():
+                    val_metrics[k] = val_metrics.get(k, 0) + v
+
+                # Update progress bar
+                pbar.set_postfix({"val_loss": f"{loss.item():.4f}"})
+
+        # Compute average metrics
+        num_batches = len(self.dataloaders["val"])
+        avg_val_loss = val_loss / num_batches
+        avg_val_metrics = {k: v / num_batches for k, v in val_metrics.items()}
+
+        # Log validation metrics
+        self.writer.add_scalar("val/epoch_loss", avg_val_loss, epoch)
+        for k, v in avg_val_metrics.items():
+            self.writer.add_scalar(f"val/epoch_{k}", v, epoch)
+
+        # Store metrics for plotting
+        self.val_losses.append(avg_val_loss)
+        self.val_box_losses.append(avg_val_metrics.get("box_loss", 0))
+        self.val_obj_losses.append(avg_val_metrics.get("obj_loss", 0))
+        self.val_cls_losses.append(avg_val_metrics.get("cls_loss", 0))
+
+        # Visualize some validation examples
+        if len(self.dataloaders["val"]) > 0:
+            self.visualize_predictions(epoch)
+
+        return avg_val_loss, avg_val_metrics
+
+    def visualize_predictions(self, epoch):
+        """
+        Visualize model predictions on validation data
+
+        Creates visualizations comparing ground truth annotations
+        with model predictions and saves them to the visualization directory.
+        """
+        # Get a batch from validation set
+        self.model.eval()
+        batch = next(iter(self.dataloaders["val"]))
+
+        current_frames = batch["current_frames"].to(self.device)
+        control_images = batch["control_images"].to(self.device)
+        annotations = batch["annotations"]
+
+        # Limit to 4 images for visualization
+        n_samples = min(4, current_frames.size(0))
+
+        with torch.no_grad():
+            # Get predictions
+            predictions = self.model(current_frames[:n_samples], control_images[:n_samples])
+
+            # Process predictions using YOLOv5's non_max_suppression if available
+            try:
+                # Apply non-max suppression to get detections
+                detections = non_max_suppression(
+                    predictions, conf_thres=0.25, iou_thres=0.45, max_det=100  # Confidence threshold  # IoU threshold
+                )  # Maximum detections
+
+                # Now create visualizations with both ground truth and predictions
+                for i in range(n_samples):
+                    # Convert tensors to numpy arrays
+                    frame = current_frames[i].cpu().permute(1, 2, 0).numpy() * 255
+                    frame = frame.astype(np.uint8)
+
+                    control = control_images[i].cpu().permute(1, 2, 0).numpy() * 255
+                    control = control.astype(np.uint8)
+
+                    # Draw ground truth annotations in green
+                    gt_frame = frame.copy()
+                    if i < len(annotations):
+                        from yolov5_motion.data.utils import draw_bounding_boxes
+
+                        gt_frame = draw_bounding_boxes(gt_frame, annotations[i], color=(0, 255, 0))
+
+                    # Draw predicted bounding boxes in red
+                    pred_frame = frame.copy()
+                    if i < len(detections) and detections[i] is not None:
+                        # Scale coordinates to image size
+                        det = detections[i].clone()
+                        det[:, :4] = scale_boxes(current_frames.shape[2:], det[:, :4], pred_frame.shape).round()
+
+                        # Draw each detection
+                        for *xyxy, conf, cls in det:
+                            # Convert to integers
+                            xyxy = [int(x.item()) for x in xyxy]
+
+                            # Draw bounding box
+                            cv2.rectangle(pred_frame, (xyxy[0], xyxy[1]), (xyxy[2], xyxy[3]), (0, 0, 255), 2)
+
+                            # Add label with confidence
+                            label = f"{int(cls.item())}: {conf:.2f}"
+                            cv2.putText(pred_frame, label, (xyxy[0], xyxy[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+                    # Create a side-by-side comparison: GT, Predictions, Control Image
+                    comparison = np.hstack((gt_frame, pred_frame, control))
+
+                    # Save the visualization
+                    cv2.imwrite(str(self.viz_dir / f"val_epoch{epoch}_sample{i}.jpg"), cv2.cvtColor(comparison, cv2.COLOR_RGB2BGR))
+
+                # Create a panel of all samples
+                if n_samples > 0:
+                    # Load saved images
+                    panel_images = []
+                    for i in range(n_samples):
+                        img_path = self.viz_dir / f"val_epoch{epoch}_sample{i}.jpg"
+                        if img_path.exists():
+                            img = cv2.imread(str(img_path))
+                            if img is not None:
+                                panel_images.append(img)
+
+                    # Create panel if images are available
+                    if panel_images:
+                        # Resize images to same height
+                        max_width = max(img.shape[1] for img in panel_images)
+                        target_height = 300  # Fixed height for panel
+
+                        resized_images = []
+                        for img in panel_images:
+                            aspect = img.shape[1] / img.shape[0]
+                            resized_width = int(target_height * aspect)
+                            resized = cv2.resize(img, (resized_width, target_height))
+                            resized_images.append(resized)
+
+                        # Create vertical stack with padding to same width
+                        panel = []
+                        for img in resized_images:
+                            if img.shape[1] < max_width:
+                                pad_width = max_width - img.shape[1]
+                                pad = np.ones((img.shape[0], pad_width, 3), dtype=np.uint8) * 255
+                                padded_img = np.hstack((img, pad))
+                                panel.append(padded_img)
+                            else:
+                                panel.append(img)
+
+                        if panel:
+                            panel = np.vstack(panel)
+                            cv2.imwrite(str(self.viz_dir / f"val_panel_epoch{epoch}.jpg"), panel)
+
+            except (NameError, Exception) as e:
+                print(f"Could not generate prediction visualizations: {e}")
+
+                # Fallback: just visualize ground truth and control images
+                for i in range(n_samples):
+                    # Convert tensors to numpy arrays
+                    frame = current_frames[i].cpu().permute(1, 2, 0).numpy() * 255
+                    frame = frame.astype(np.uint8)
+
+                    control = control_images[i].cpu().permute(1, 2, 0).numpy() * 255
+                    control = control.astype(np.uint8)
+
+                    # Draw ground truth annotations
+                    gt_frame = frame.copy()
+                    if i < len(annotations):
+                        from yolov5_motion.data.utils import draw_bounding_boxes
+
+                        gt_frame = draw_bounding_boxes(gt_frame, annotations[i])
+
+                    # Create a side-by-side comparison
+                    comparison = np.hstack((gt_frame, control))
+
+                    # Save the visualization
+                    cv2.imwrite(str(self.viz_dir / f"val_epoch{epoch}_sample{i}.jpg"), cv2.cvtColor(comparison, cv2.COLOR_RGB2BGR))
+
+    def plot_metrics(self):
+        """Plot and save training metrics"""
+        # Create figure with 2x2 subplots
+        fig, axs = plt.subplots(2, 2, figsize=(16, 12))
+
+        # Plot losses
+        epochs = range(1, len(self.train_losses) + 1)
+        val_epochs = [e * self.args.eval_interval for e in range(1, len(self.val_losses) + 1)]
+
+        # Plot total loss
+        axs[0, 0].plot(epochs, self.train_losses, "b-", label="Training Loss")
+        if self.val_losses:
+            axs[0, 0].plot(val_epochs, self.val_losses, "r-", label="Validation Loss")
+        axs[0, 0].set_title("Total Loss")
+        axs[0, 0].set_xlabel("Epochs")
+        axs[0, 0].set_ylabel("Loss")
+        axs[0, 0].legend()
+        axs[0, 0].grid(True)
+
+        # Plot component losses
+        axs[0, 1].plot(epochs, self.train_box_losses, "g-", label="Box Loss")
+        axs[0, 1].plot(epochs, self.train_obj_losses, "b-", label="Obj Loss")
+        axs[0, 1].plot(epochs, self.train_cls_losses, "r-", label="Cls Loss")
+        axs[0, 1].set_title("Training Component Losses")
+        axs[0, 1].set_xlabel("Epochs")
+        axs[0, 1].set_ylabel("Loss")
+        axs[0, 1].legend()
+        axs[0, 1].grid(True)
+
+        # Plot validation component losses
+        if self.val_losses:
+            axs[1, 0].plot(val_epochs, self.val_box_losses, "g-", label="Box Loss")
+            axs[1, 0].plot(val_epochs, self.val_obj_losses, "b-", label="Obj Loss")
+            axs[1, 0].plot(val_epochs, self.val_cls_losses, "r-", label="Cls Loss")
+            axs[1, 0].set_title("Validation Component Losses")
+            axs[1, 0].set_xlabel("Epochs")
+            axs[1, 0].set_ylabel("Loss")
+            axs[1, 0].legend()
+            axs[1, 0].grid(True)
+
+        # Plot learning rate
+        axs[1, 1].plot(epochs, self.lr_history, "k-")
+        axs[1, 1].set_title("Learning Rate")
+        axs[1, 1].set_xlabel("Epochs")
+        axs[1, 1].set_ylabel("Learning Rate")
+        axs[1, 1].grid(True)
+
+        # Save figure
+        plt.tight_layout()
+        plt.savefig(str(self.output_dir / "training_metrics.png"))
+        plt.savefig(str(self.output_dir / "training_metrics.pdf"))
+        plt.close()
+
+        # Also create individual learning curves
+        self._plot_individual_metric("total_loss", epochs, self.train_losses, val_epochs, self.val_losses)
+        self._plot_individual_metric("box_loss", epochs, self.train_box_losses, val_epochs, self.val_box_losses)
+        self._plot_individual_metric("obj_loss", epochs, self.train_obj_losses, val_epochs, self.val_obj_losses)
+        self._plot_individual_metric("cls_loss", epochs, self.train_cls_losses, val_epochs, self.val_cls_losses)
+
+    def _plot_individual_metric(self, name, train_epochs, train_values, val_epochs, val_values):
+        """Plot individual metric and save to file"""
+        plt.figure(figsize=(10, 6))
+        plt.plot(train_epochs, train_values, "b-", label=f"Training {name}")
+        if val_values:
+            plt.plot(val_epochs, val_values, "r-", label=f"Validation {name}")
+        plt.title(f'{name.replace("_", " ").title()}')
+        plt.xlabel("Epochs")
+        plt.ylabel("Value")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(str(self.output_dir / f"{name}.png"))
+        plt.close()
+
+    def train(self):
+        """Main training loop"""
+        print(f"Starting training for {self.args.epochs} epochs")
+
+        # Record start time for total training time calculation
+        start_time = time.time()
+
+        for epoch in range(self.start_epoch, self.args.epochs):
+            # Record epoch start time
+            epoch_start = time.time()
+
+            print(f"\n{'='*20} Epoch {epoch+1}/{self.args.epochs} {'='*20}")
+
+            # Train for one epoch
+            train_loss, train_metrics = self.train_epoch(epoch)
+
+            # Print epoch summary
+            print(f"Training: loss={train_loss:.4f}, " + ", ".join([f"{k}={v:.4f}" for k, v in train_metrics.items()]))
+
+            # Validate if this is a validation epoch
+            if (epoch + 1) % self.args.eval_interval == 0:
+                val_loss, val_metrics = self.validate(epoch)
+
+                # Print validation summary
+                print(f"Validation: loss={val_loss:.4f}, " + ", ".join([f"{k}={v:.4f}" for k, v in val_metrics.items()]))
+
+                # Check if this is the best model
+                is_best = val_loss < self.best_val_loss
+                if is_best:
+                    self.best_val_loss = val_loss
+                    print(f"New best model with val_loss={val_loss:.4f}")
+            else:
+                is_best = False
+
+            # Save checkpoint if this is a save epoch
+            if (epoch + 1) % self.args.save_interval == 0 or epoch == self.args.epochs - 1:
+                self.save_checkpoint(epoch, is_best=is_best)
+                print(f"Saved checkpoint at epoch {epoch+1}")
+
+            # Plot current metrics every 10 epochs
+            if (epoch + 1) % 10 == 0:
+                self.plot_metrics()
+
+            # Calculate and print epoch time
+            epoch_time = time.time() - epoch_start
+            print(f"Epoch completed in {epoch_time:.2f} seconds")
+
+            # Estimate remaining time
+            elapsed_time = time.time() - start_time
+            epochs_done = epoch - self.start_epoch + 1
+            epochs_left = self.args.epochs - epoch - 1
+            estimated_time_left = (elapsed_time / epochs_done) * epochs_left if epochs_done > 0 else 0
+
+            print(f"Elapsed time: {elapsed_time/3600:.2f} hours")
+            print(f"Estimated time remaining: {estimated_time_left/3600:.2f} hours")
+
+        # Calculate total training time
+        total_time = time.time() - start_time
+        print(f"Total training time: {total_time/3600:.2f} hours")
+
+        # Save final model
+        self.save_checkpoint(self.args.epochs - 1, is_best=False)
+        print("Training completed!")
+
+        # Plot and save final metrics graphs
+        self.plot_metrics()
+
+        # Close the tensorboard writer
+        self.writer.close()
+
+
+def main():
+    """
+    Main training function that can be called directly or imported.
+    Handles configuration loading and training initialization.
+    """
+    import argparse
+    import yaml
+    import os
+    import torch
+    import numpy as np
+    from pathlib import Path
+
+    # Parse command line arguments - define this inline to avoid needing parse_args()
+    parser = argparse.ArgumentParser(description="Train YOLOv5 with ControlNet for Motion")
+
+    # Only require config path for YAML configuration
+    parser.add_argument("--config", type=str, required=True, help="Path to YAML configuration file")
+
+    # Allow command-line overrides for key parameters
+    parser.add_argument("--output_dir", type=str, help="Override output directory from config")
+    parser.add_argument("--epochs", type=int, help="Override number of epochs from config")
+    parser.add_argument("--batch_size", type=int, help="Override batch size from config")
+    parser.add_argument("--lr", type=float, help="Override learning rate from config")
+    parser.add_argument("--resume", type=str, help="Override resume checkpoint path from config")
+
+    cmd_args = parser.parse_args()
+
+    # Load configuration from YAML file - inline implementation
+    with open(cmd_args.config, "r") as f:
+        config_dict = yaml.safe_load(f)
+
+    # Apply command-line overrides if provided
+    if cmd_args.output_dir:
+        config_dict["data"]["output_dir"] = cmd_args.output_dir
+
+    if cmd_args.epochs:
+        config_dict["training"]["epochs"] = cmd_args.epochs
+
+    if cmd_args.batch_size:
+        config_dict["training"]["batch_size"] = cmd_args.batch_size
+
+    if cmd_args.lr:
+        config_dict["training"]["lr"] = cmd_args.lr
+
+    if cmd_args.resume:
+        config_dict["training"]["resume"] = cmd_args.resume
+
+    # Create a flat namespace for backwards compatibility - inline implementation
+    args = argparse.Namespace()
+
+    # Data paths
+    args.preprocessed_dir = config_dict["data"]["preprocessed_dir"]
+    args.annotations_dir = config_dict["data"]["annotations_dir"]
+    args.splits_file = config_dict["data"]["splits_file"]
+    args.output_dir = config_dict["data"]["output_dir"]
+
+    # Model configuration
+    args.yolo_weights = config_dict["model"]["yolo_weights"]
+    args.controlnet_weights = config_dict["model"]["controlnet_weights"]
+    args.yolo_cfg = config_dict["model"]["yolo_cfg"]
+    args.img_size = config_dict["model"]["img_size"]
+    args.num_classes = config_dict["model"]["num_classes"]
+    args.train_controlnet_only = config_dict["model"]["train_controlnet_only"]
+
+    # Training parameters
+    args.epochs = config_dict["training"]["epochs"]
+    args.batch_size = config_dict["training"]["batch_size"]
+    args.val_batch_size = config_dict["training"]["val_batch_size"]
+    args.workers = config_dict["training"]["workers"]
+    args.val_ratio = config_dict["training"]["val_ratio"]
+
+    # Optimizer settings
+    args.optimizer = config_dict["training"]["optimizer"]
+    args.lr = config_dict["training"]["lr"]
+    args.weight_decay = config_dict["training"]["weight_decay"]
+    args.momentum = config_dict["training"]["momentum"]
+
+    # Loss weights
+    args.box_weight = config_dict["training"]["loss"]["box_weight"]
+    args.obj_weight = config_dict["training"]["loss"]["obj_weight"]
+    args.cls_weight = config_dict["training"]["loss"]["cls_weight"]
+
+    # Precision
+    args.precision = config_dict["training"]["precision"]
+
+    # Checkpointing
+    args.save_interval = config_dict["training"]["save_interval"]
+    args.log_interval = config_dict["training"]["log_interval"]
+    args.eval_interval = config_dict["training"]["eval_interval"]
+
+    # Resume
+    args.resume = config_dict["training"]["resume"]
+
+    # Save the resolved configuration
+    os.makedirs(args.output_dir, exist_ok=True)
+    with open(os.path.join(args.output_dir, "resolved_config.yaml"), "w") as f:
+        yaml.dump(config_dict, f, default_flow_style=False)
+
+    # Set random seeds for reproducibility
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(42)
+    np.random.seed(42)
+
+    # Create trainer and start training
+    trainer = Trainer(args)
+    trainer.train()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,9 +1,7 @@
 import json
-import torch
 import numpy as np
 import cv2
 from decord import VideoReader, cpu
-from typing import Dict, List, Any
 from pathlib import Path
 import shutil
 import concurrent.futures
@@ -67,8 +65,8 @@ def preprocess_videos(
         video_id = Path(video_filename).stem
         video_resolutions[video_id] = resolution
 
-    # Create a list of frames to extract
-    frames_to_extract = []
+    # Organize frames by video
+    frames_by_video = {}
     frames_with_annotations = {}  # To track frames that have annotations
 
     for ann_file in annotation_files:
@@ -95,6 +93,9 @@ def preprocess_videos(
         if video_id not in frames_with_annotations:
             frames_with_annotations[video_id] = set()
 
+        if video_id not in frames_by_video:
+            frames_by_video[video_id] = {"video_path": str(video_path), "frames": set(), "fps": fps}
+
         for entity in annotation["entities"]:
             frame_idx = entity["blob"]["frame_idx"]
             frame_indices.add(frame_idx)
@@ -110,194 +111,204 @@ def preprocess_videos(
             prev_frame_idx = max(0, int(prev_frame_time * fps))
             frame_indices.add(prev_frame_idx)
 
-        # Add frames to extraction list
-        for frame_idx in frame_indices:
-            frames_to_extract.append(
-                {
-                    "video_path": str(video_path),
-                    "video_id": video_id,
-                    "frame_idx": frame_idx,
-                    "has_annotation": frame_idx in frames_with_annotations[video_id],
-                }
-            )
+        # Add frames to video's list
+        frames_by_video[video_id]["frames"].update(frame_indices)
 
-    print(f"Extracting {len(frames_to_extract)} frames from videos...")
+    # Count total frames to process
+    total_frames = sum(len(video_info["frames"]) for video_info in frames_by_video.values())
+    print(f"Will extract {total_frames} frames from {len(frames_by_video)} videos")
 
-    # Define a function to extract and save frames from a batch of videos
-    def process_video_batch(video_items):
-        if not video_items:
-            return
+    # Create a list of videos to process in parallel
+    videos_to_process = []
+    for video_id, video_info in frames_by_video.items():
+        videos_to_process.append(
+            {
+                "video_id": video_id,
+                "video_path": video_info["video_path"],
+                "frames": sorted(list(video_info["frames"])),
+                "fps": video_info["fps"],
+                "has_annotations": frames_with_annotations.get(video_id, set()),
+            }
+        )
 
-        # Group items by video path
-        by_video = {}
-        for item in video_items:
-            video_path = item["video_path"]
-            if video_path not in by_video:
-                by_video[video_path] = []
-            by_video[video_path].append(item)
+    # Define a function to process an entire video
+    def process_video(video_item):
+        video_id = video_item["video_id"]
+        video_path = video_item["video_path"]
+        frames_to_extract = video_item["frames"]
+        fps = video_item["fps"]
+        has_annotations = video_item["has_annotations"]
 
-        # Process each video
-        for video_path, items in by_video.items():
-            try:
-                # Open video
-                vr = VideoReader(video_path, ctx=cpu(0))
+        try:
+            print(f"Processing video {video_id} with {len(frames_to_extract)} frames...")
 
-                # Get all frame indices for this video
-                frame_indices = [item["frame_idx"] for item in items]
+            # Create output directories for this video
+            video_output_dir = frames_path / video_id
+            video_output_dir.mkdir(exist_ok=True)
 
-                # Create output directories if they don't exist
-                video_id = items[0]["video_id"]
-                video_output_dir = frames_path / video_id
-                video_output_dir.mkdir(exist_ok=True)
+            control_output_dir = control_path / video_id
+            control_output_dir.mkdir(exist_ok=True)
 
-                control_output_dir = control_path / video_id
-                control_output_dir.mkdir(exist_ok=True)
+            # Open video
+            vr = VideoReader(video_path, ctx=cpu(0))
 
-                if not frame_indices:
+            # Compute control frame pairs
+            control_frame_pairs = []
+            for frame_idx in frames_to_extract:
+                frame_time = frame_idx / fps
+                prev_frame_time = max(0, frame_time - prev_frame_time_diff)
+                prev_frame_idx = max(0, int(prev_frame_time * fps))
+                control_frame_pairs.append((frame_idx, prev_frame_idx))
+
+            # Get unique indices to read (includes both frames_to_extract and their control frames)
+            all_indices = set(frames_to_extract)
+            all_indices = sorted(all_indices)
+
+            # Read all needed frames in smaller chunks to avoid memory issues
+            chunk_size = 500  # Process 100 frames at a time
+            frames_dict = {}
+
+            for i in range(0, len(all_indices), chunk_size):
+                chunk_indices = all_indices[i : i + chunk_size]
+                try:
+                    batch_frames = vr.get_batch(chunk_indices).asnumpy()
+                    for j, idx in enumerate(chunk_indices):
+                        frames_dict[idx] = batch_frames[j]
+                except Exception as e:
+                    print(f"Error reading frames chunk from {video_path}: {e}")
+
+            # Process each frame and its control pair
+            for frame_idx in tqdm(frames_to_extract, desc=f"Processing {video_id} frames"):
+                if frame_idx not in frames_dict:
                     continue
 
-                # Get fps from annotation file
-                fps = None
-                for ann_file in annotation_files:
-                    with open(ann_file, "r") as f:
-                        annotation = json.load(f)
-                    if Path(annotation["metadata"]["data_path"]).stem == video_id:
-                        fps = annotation["metadata"]["fps"]
+                # Identify the corresponding control frame
+                prev_frame_idx = None
+                for curr, prev in control_frame_pairs:
+                    if curr == frame_idx:
+                        prev_frame_idx = prev
                         break
 
-                if fps is None:
-                    print(f"Warning: Could not find fps for video {video_id}, skipping")
+                if prev_frame_idx is None or prev_frame_idx not in frames_dict:
                     continue
 
-                # Compute control frame indices based on time difference
-                control_frame_pairs = []
-                for frame_idx in frame_indices:
-                    frame_time = frame_idx / fps
-                    prev_frame_time = max(0, frame_time - prev_frame_time_diff)
-                    prev_frame_idx = max(0, int(prev_frame_time * fps))
-                    control_frame_pairs.append((frame_idx, prev_frame_idx))
+                frame = frames_dict[frame_idx]
+                prev_frame = frames_dict[prev_frame_idx]
 
-                # Get unique indices to read (includes both frame_indices and their corresponding control frames)
-                all_indices = set(frame_indices)
-                for _, prev_idx in control_frame_pairs:
-                    all_indices.add(prev_idx)
-                all_indices = sorted(all_indices)
+                # Resize and pad frame
+                h, w = frame.shape[:2]
+                target_w, target_h = resize_to
 
-                # Read all needed frames at once
-                frames_dict = {}
-                try:
-                    batch_frames = vr.get_batch(all_indices).asnumpy()
-                    for i, idx in enumerate(all_indices):
-                        frames_dict[idx] = batch_frames[i]
-                except Exception as e:
-                    print(f"Error reading frames from {video_path}: {e}")
-                    continue
+                # Calculate scaling factor to maintain aspect ratio
+                scale = min(target_w / w, target_h / h)
 
-                # Process each frame and its control pair
-                for frame_idx, prev_frame_idx in control_frame_pairs:
-                    if frame_idx not in frames_dict or prev_frame_idx not in frames_dict:
-                        continue
+                # Calculate new size
+                new_w = int(w * scale)
+                new_h = int(h * scale)
 
-                    frame = frames_dict[frame_idx]
-                    prev_frame = frames_dict[prev_frame_idx]
+                # Resize images
+                resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                resized_prev = cv2.resize(prev_frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-                    # Resize and pad frame
-                    h, w = frame.shape[:2]
-                    target_w, target_h = resize_to
+                # Create target image with padding color
+                target_image = np.ones((target_h, target_w, 3), dtype=np.uint8) * np.array(pad_color, dtype=np.uint8)
+                target_prev = np.ones((target_h, target_w, 3), dtype=np.uint8) * np.array(pad_color, dtype=np.uint8)
 
-                    # Calculate scaling factor to maintain aspect ratio
-                    scale = min(target_w / w, target_h / h)
+                # Calculate padding
+                pad_w = (target_w - new_w) // 2
+                pad_h = (target_h - new_h) // 2
 
-                    # Calculate new size
-                    new_w = int(w * scale)
-                    new_h = int(h * scale)
+                # Place resized image on target image
+                target_image[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = resized
+                target_prev[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = resized_prev
 
-                    # Resize images
-                    resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-                    resized_prev = cv2.resize(prev_frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                # Save frame as JPEG
+                frame_output_path = video_output_dir / f"frame_{frame_idx:06d}.jpg"
+                cv2.imwrite(str(frame_output_path), cv2.cvtColor(target_image, cv2.COLOR_RGB2BGR))
 
-                    # Create target image with padding color
-                    target_image = np.ones((target_h, target_w, 3), dtype=np.uint8) * np.array(pad_color, dtype=np.uint8)
-                    target_prev = np.ones((target_h, target_w, 3), dtype=np.uint8) * np.array(pad_color, dtype=np.uint8)
+                # Save previous frame if it has annotations
+                if prev_frame_idx in has_annotations:
+                    prev_frame_output_path = video_output_dir / f"frame_{prev_frame_idx:06d}.jpg"
+                    cv2.imwrite(str(prev_frame_output_path), cv2.cvtColor(target_prev, cv2.COLOR_RGB2BGR))
 
-                    # Calculate padding
-                    pad_w = (target_w - new_w) // 2
-                    pad_h = (target_h - new_h) // 2
+                # Generate and save control image
+                control_image = create_control_image(target_prev, target_image)
+                control_output_path = control_output_dir / f"control_{frame_idx:06d}_{prev_frame_idx:06d}.jpg"
+                cv2.imwrite(str(control_output_path), cv2.cvtColor(control_image, cv2.COLOR_RGB2BGR))
 
-                    # Place resized image on target image
-                    target_image[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = resized
-                    target_prev[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = resized_prev
+            # Clear memory
+            del frames_dict
 
-                    # Save frame as JPEG
-                    frame_output_path = video_output_dir / f"frame_{frame_idx:06d}.jpg"
-                    cv2.imwrite(str(frame_output_path), cv2.cvtColor(target_image, cv2.COLOR_RGB2BGR))
+            return video_id, len(frames_to_extract)
 
-                    # Save previous frame if it has annotations (we might need it later)
-                    if prev_frame_idx in frames_with_annotations.get(video_id, set()):
-                        prev_frame_output_path = video_output_dir / f"frame_{prev_frame_idx:06d}.jpg"
-                        cv2.imwrite(str(prev_frame_output_path), cv2.cvtColor(target_prev, cv2.COLOR_RGB2BGR))
+        except Exception as e:
+            print(f"Error processing video {video_id} ({video_path}): {e}")
+            import traceback
 
-                    # Generate and save control image
-                    control_image = create_control_image(target_prev, target_image)
-                    control_output_path = control_output_dir / f"control_{frame_idx:06d}_{prev_frame_idx:06d}.jpg"
-                    cv2.imwrite(str(control_output_path), cv2.cvtColor(control_image, cv2.COLOR_RGB2BGR))
+            traceback.print_exc()
+            return video_id, 0
 
-            except Exception as e:
-                print(f"Error processing batch for {video_path}: {e}")
-                import traceback
-
-                traceback.print_exc()
-
-    # Process videos in batches
-    batch_size = 100  # Number of frames to process at a time
-    video_batches = [frames_to_extract[i : i + batch_size] for i in range(0, len(frames_to_extract), batch_size)]
+    # Process videos in parallel
+    print(f"Processing {len(videos_to_process)} videos with {num_workers} parallel workers...")
+    results = []
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
-        list(tqdm(executor.map(process_video_batch, video_batches), total=len(video_batches)))
+        future_to_video = {executor.submit(process_video, video_item): video_item["video_id"] for video_item in videos_to_process}
 
-    print(f"Preprocessing complete. Extracted frames saved to {frames_path}")
+        for future in tqdm(concurrent.futures.as_completed(future_to_video), total=len(videos_to_process), desc="Processing videos"):
+            video_id = future_to_video[future]
+            try:
+                processed_video, processed_frames = future.result()
+                results.append((processed_video, processed_frames))
+            except Exception as e:
+                print(f"Video {video_id} generated an exception: {e}")
+
+    total_processed = sum(frames for _, frames in results)
+    print(f"Preprocessing complete. Extracted {total_processed} frames across {len(results)} videos.")
+    print(f"Frames saved to {frames_path}")
     print(f"Control images saved to {control_path}")
 
-    # Save metadata about processed frames including control image pairs
-    metadata = {"num_frames": len(frames_to_extract), "frame_size": resize_to, "prev_frame_time_diff": prev_frame_time_diff, "videos": {}}
-
     # Create a mapping of frame to previous frame for control images
-    frame_to_prev_frame = {}
+    print("Creating metadata...")
+    metadata = {"num_frames": total_processed, "frame_size": resize_to, "prev_frame_time_diff": prev_frame_time_diff, "videos": {}}
 
-    # Group frames by video
-    for item in frames_to_extract:
-        video_id = item["video_id"]
-        frame_idx = item["frame_idx"]
-        has_annotation = item["has_annotation"]
+    # Pre-process annotation files to create mappings for faster lookup
+    video_fps_mapping = {}
+    for ann_file in annotation_files:
+        with open(ann_file, "r") as f:
+            annotation = json.load(f)
+        video_id = Path(annotation["metadata"]["data_path"]).stem
+        fps = annotation["metadata"]["fps"]
+        video_fps_mapping[video_id] = fps
 
+    # Process each video's frames for metadata
+    for video_id, video_info in tqdm(frames_by_video.items(), desc="Building metadata"):
         if video_id not in metadata["videos"]:
             metadata["videos"][video_id] = {
-                "frames": [],
-                "annotation_frames": [],
+                "frames": sorted(list(video_info["frames"])),
+                "annotation_frames": sorted(list(frames_with_annotations.get(video_id, set()))),
                 "resolution": video_resolutions.get(video_id, (0, 0)),
                 "frame_to_prev_frame": {},
             }
 
-        metadata["videos"][video_id]["frames"].append(frame_idx)
+        # Get fps for this video
+        fps = video_fps_mapping.get(video_id)
+        if fps is None:
+            print(f"Warning: Could not find fps for video {video_id}, skipping metadata")
+            continue
 
-        if has_annotation:
-            metadata["videos"][video_id]["annotation_frames"].append(frame_idx)
+        # Process annotation frames for this video to create frame_to_prev_frame mapping
+        for frame_idx in frames_with_annotations.get(video_id, set()):
+            # Compute previous frame index
+            frame_time = frame_idx / fps
+            prev_frame_time = max(0, frame_time - prev_frame_time_diff)
+            prev_frame_idx = max(0, int(prev_frame_time * fps))
 
-            # Find fps from annotation files to compute prev_frame_idx
-            for ann_file in annotation_files:
-                with open(ann_file, "r") as f:
-                    annotation = json.load(f)
-                if Path(annotation["metadata"]["data_path"]).stem == video_id:
-                    fps = annotation["metadata"]["fps"]
-                    frame_time = frame_idx / fps
-                    prev_frame_time = max(0, frame_time - prev_frame_time_diff)
-                    prev_frame_idx = max(0, int(prev_frame_time * fps))
-
-                    # Store the mapping
-                    metadata["videos"][video_id]["frame_to_prev_frame"][str(frame_idx)] = prev_frame_idx
-                    break
+            # Store the mapping
+            metadata["videos"][video_id]["frame_to_prev_frame"][str(frame_idx)] = prev_frame_idx
 
     # Save metadata to output directory
+    print("Saving metadata...")
     metadata_path = output_path / "metadata.json"
     with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=2)
