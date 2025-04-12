@@ -350,6 +350,7 @@ class Trainer:
         """
         # Initialize list to hold all target rows
         all_targets = []
+        img_size = self.args.img_size
 
         # Process each batch item
         for batch_idx, annotations in enumerate(targets):
@@ -357,8 +358,13 @@ class Trainer:
                 # Extract bounding box
                 bbox = torch.tensor(ann["bbox"], dtype=torch.float32)
 
-                # Extract class label
-                # Assuming the first label is the class index
+                # Normalize coordinates to [0,1]
+                normalized_bbox = torch.zeros_like(bbox)
+                normalized_bbox[0] = bbox[0] / img_size  # normalize center_x
+                normalized_bbox[1] = bbox[1] / img_size  # normalize center_y
+                normalized_bbox[2] = bbox[2] / img_size  # normalize width
+                normalized_bbox[3] = bbox[3] / img_size  # normalize height
+
                 class_idx = 0  # Default class index if not specified
                 if "labels" in ann:
                     if isinstance(ann["labels"], list) and len(ann["labels"]) > 0:
@@ -368,7 +374,7 @@ class Trainer:
                             class_idx = ann["labels"][0]
 
                 # Create target row [batch_idx, class_idx, x, y, w, h]
-                target_row = torch.tensor([batch_idx, class_idx, *bbox], dtype=torch.float32)
+                target_row = torch.tensor([batch_idx, class_idx, *normalized_bbox], dtype=torch.float32)
                 all_targets.append(target_row)
 
         # Combine all target rows
@@ -407,6 +413,8 @@ class Trainer:
 
             # Backward pass (no scaler needed for bf16)
             loss.backward()
+
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
             self.optimizer.step()
 
             # Update metrics

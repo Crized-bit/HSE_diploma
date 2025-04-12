@@ -27,8 +27,8 @@ training:
   val_ratio: 0.1
   
   # Prodigy works well with large batch sizes on A100
-  optimizer: "prodigy"  
-  lr: 1.0
+  optimizer: "adam"  
+  lr: 0.001
   weight_decay: 0.0005
   momentum: 0.937
   
