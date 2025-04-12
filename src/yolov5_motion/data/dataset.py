@@ -128,6 +128,10 @@ class PreprocessedVideoDataset(Dataset):
             frame_annotations = {}
 
             for entity in annotation["entities"]:
+                # Skip reflections
+                if "labels" in entity and isinstance(entity["labels"], dict) and entity["labels"].get("reflection") == 1:
+                    continue  # Skip this annotation
+
                 frame_idx = entity["blob"]["frame_idx"]
 
                 if frame_idx not in frame_annotations:

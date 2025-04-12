@@ -19,8 +19,8 @@ class ZeroConv(nn.Module):
     def __init__(self, c1, c2):
         super().__init__()
         self.conv = nn.Conv2d(c1, c2, 1, 1, 0)
-        nn.init.zeros_(self.conv.weight)
-        nn.init.zeros_(self.conv.bias)
+        # nn.init.zeros_(self.conv.weight)
+        # nn.init.zeros_(self.conv.bias)
 
     def forward(self, x):
         return self.conv(x)
@@ -30,7 +30,7 @@ class ControlNetModel(nn.Module):
     def __init__(self, yolo_model: YOLOv5Model):
         super().__init__()
         # Clone YOLOv5 backbone structure
-        self.backbone = copy.deepcopy(yolo_model.model[:10])
+        self.backbone = nn.ModuleList([copy.deepcopy(module) for module in yolo_model.model[:10]])
         self.save = yolo_model.save
         self.convs_idx = [4, 6, 9]
 
@@ -65,7 +65,8 @@ class ControlNetModel(nn.Module):
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             x = m(x)  # run
             if idx in self.convs_idx:
-                conv_outputs.append(self.convs[i](x))
+                conv_output = self.convs[i](x)
+                conv_outputs.append(conv_output)
                 i += 1
             y.append(x if m.i in self.save else None)  # save output
         return conv_outputs
@@ -87,8 +88,10 @@ def test_control_net():
         print("ControlNetModel created successfully")
 
         # Test forward pass
-        with torch.no_grad():
-            outputs = control_net(test_input)
+        # with torch.no_grad():
+        outputs = control_net(test_input)
+        loss = sum(output.sum() for output in outputs)
+        loss.backward()
 
         print(f"ControlNet output shape: {[output.shape for output in outputs]}")
         print("ControlNet test complete.")

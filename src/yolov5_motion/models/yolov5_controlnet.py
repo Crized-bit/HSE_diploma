@@ -1,3 +1,4 @@
+from matplotlib import pyplot as plt
 import torch
 import torch.nn as nn
 import os
@@ -15,7 +16,7 @@ from yolov5_motion.models.blocks import ControlNetModel
 
 
 class YOLOv5WithControlNet(nn.Module):
-    def __init__(self, cfg="yolov5m.yaml", ch=3, nc=80, anchors=None):
+    def __init__(self, cfg="yolov5m.yaml", ch=3, nc=80, anchors=None, yolo_weights=None):
         """
         Initializes YOLOv5 model with ControlNet integration
 
@@ -29,8 +30,16 @@ class YOLOv5WithControlNet(nn.Module):
         # Initialize YOLOv5 base model
         self.yolo = YOLOv5Model(cfg, ch=ch, nc=nc, anchors=anchors)
 
-        # self.yolo.nc = nc  # attach number of classes to model
-
+        if yolo_weights is not None:
+            current_model_dict = self.yolo.state_dict()
+            new_state_dict = {
+                k: v if v.size() == current_model_dict[k].size() else current_model_dict[k]
+                for k, v in zip(current_model_dict.keys(), yolo_weights.values())
+            }
+            missing_keys, unexpected = self.yolo.load_state_dict(new_state_dict, strict=False)
+            print("missing_keys:", missing_keys)
+            print("unexpected:", unexpected)
+            print(f"Loaded YOLOv5 weights from file")
         # Initialize ControlNet with the YOLOv5 model
         self.controlnet = ControlNetModel(self.yolo)
 
@@ -78,7 +87,7 @@ class YOLOv5WithControlNet(nn.Module):
     def train_controlnet(self):
         """Set model to train only ControlNet parameters"""
         # Freeze YOLOv5 parameters
-        for name,param in self.yolo.named_parameters():
+        for name, param in self.yolo.named_parameters():
             if name.startswith("model.24"):
                 param.requires_grad = True
             else:
@@ -125,8 +134,6 @@ def create_combined_model(cfg, yolo_weights=None, controlnet_weights=None, img_s
     Returns:
         Combined YOLOv5+ControlNet model
     """
-    # Create model
-    model = YOLOv5WithControlNet(cfg=cfg, nc=nc)
 
     # Load YOLOv5 weights if provided
     if yolo_weights:
@@ -141,17 +148,12 @@ def create_combined_model(cfg, yolo_weights=None, controlnet_weights=None, img_s
                         state_dict = state_dict.float()
                     if hasattr(state_dict, "state_dict"):
                         state_dict = state_dict.state_dict()
-                current_model_dict = model.yolo.state_dict()
-                new_state_dict = {
-                    k: v if v.size() == current_model_dict[k].size() else current_model_dict[k]
-                    for k, v in zip(current_model_dict.keys(), state_dict.values())
-                }
-                missing_keys, unexpected = model.yolo.load_state_dict(new_state_dict, strict=False)
-                print("missing_keys:", missing_keys)
-                print("unexpected:", unexpected)
-                print(f"Loaded YOLOv5 weights from {yolo_weights}")
             else:
                 print(f"Warning: YOLOv5 weights file {yolo_weights} not found")
+                state_dict = None
+
+    # Create model
+    model = YOLOv5WithControlNet(cfg=cfg, nc=nc, yolo_weights=state_dict)
 
     # Load ControlNet weights if provided
     if controlnet_weights:
@@ -167,6 +169,124 @@ def create_combined_model(cfg, yolo_weights=None, controlnet_weights=None, img_s
     img_size = check_img_size(img_size, gs)
 
     return model
+
+
+class GradientTracker:
+    def __init__(self, trainer):
+        self.trainer = trainer
+        self.gradient_norms = {}
+        self.hook_handles = []
+        self.module_names = {}
+
+    def register_hooks(self):
+        """Register hooks to track gradient norms for ControlNetModel modules"""
+        # Create a mapping of modules to their names for easier identification
+        for name, module in self.trainer.model.controlnet.named_modules():
+            if isinstance(module, (nn.Conv2d, nn.Sequential)) and name != "":
+                self.module_names[module] = name
+                handle = module.register_full_backward_hook(self._backward_hook)
+                self.hook_handles.append(handle)
+
+        print(f"Registered gradient hooks for {len(self.hook_handles)} modules in ControlNetModel")
+
+    def _backward_hook(self, module, grad_input, grad_output):
+        """Hook function to record gradient norms during backpropagation"""
+        module_name = self.module_names.get(module, "unknown")
+        # Use the norm of the gradient output for visualization
+        if grad_output and isinstance(grad_output, tuple) and grad_output[0] is not None:
+            norm = grad_output[0].norm().item()
+            if module_name not in self.gradient_norms:
+                self.gradient_norms[module_name] = []
+            self.gradient_norms[module_name].append(norm)
+
+    def visualize_gradient_norms(self, epoch):
+        """Visualize gradient norms for ControlNetModel layers"""
+        if not self.gradient_norms:
+            print("No gradient norms collected yet")
+            return
+
+        # Group parameters by layer type
+        layer_norms = {}
+        for name, norms in self.gradient_norms.items():
+            # Extract layer type from name (e.g., 'convs.0.0' -> 'convs_0')
+            parts = name.split(".")
+            if len(parts) >= 2:
+                layer_name = f"{parts[0]}_{parts[1]}"
+                if layer_name not in layer_norms:
+                    layer_norms[layer_name] = []
+                # Append the mean norm for this parameter
+                if norms:
+                    layer_norms[layer_name].append(sum(norms) / len(norms))
+
+        # Calculate mean norm for each layer type
+        mean_layer_norms = {layer: sum(norms) / len(norms) for layer, norms in layer_norms.items()}
+
+        # Sort layers by name for consistent ordering
+        sorted_layers = sorted(mean_layer_norms.keys())
+
+        # Create visualization
+        plt.figure(figsize=(14, 8))
+        bars = plt.bar(range(len(sorted_layers)), [mean_layer_norms[layer] for layer in sorted_layers])
+
+        # Add values on top of bars
+        for bar in bars:
+            height = bar.get_height()
+            plt.text(bar.get_x() + bar.get_width() / 2.0, height, f"{height:.4f}", ha="center", va="bottom", rotation=0)
+
+        plt.xticks(range(len(sorted_layers)), sorted_layers, rotation=45)
+        plt.xlabel("ControlNet Layer")
+        plt.ylabel("Mean Gradient Norm")
+        plt.title(f"Mean Gradient Norms for ControlNet Layers (Epoch {epoch+1})")
+        plt.tight_layout()
+
+        # Save figure
+        grad_viz_dir = self.trainer.output_dir / "gradient_visualizations"
+        grad_viz_dir.mkdir(exist_ok=True)
+        plt.savefig(str(grad_viz_dir / f"gradient_norms_epoch_{epoch+1}.png"))
+        plt.close()
+
+        # Also log to tensorboard
+        for layer in sorted_layers:
+            self.trainer.writer.add_scalar(f"gradients/{layer}", mean_layer_norms[layer], epoch)
+
+        # Reset gradient norms for next epoch
+        self.gradient_norms = {}
+
+    def visualize_scaling_factors(self, epoch):
+        """Visualize learned scaling factors for ControlNetModel"""
+        if hasattr(self.trainer.model.controlnet, "scale_factors") and self.trainer.model.controlnet.scale_factors is not None:
+            scale_factors = self.trainer.model.controlnet.scale_factors.detach().cpu().numpy()
+
+            plt.figure(figsize=(10, 6))
+            bars = plt.bar(range(len(scale_factors)), scale_factors)
+
+            # Add values on top of bars
+            for bar in bars:
+                height = bar.get_height()
+                plt.text(bar.get_x() + bar.get_width() / 2.0, height, f"{height:.4f}", ha="center", va="bottom", rotation=0)
+
+            plt.xticks(range(len(scale_factors)), [f"Layer {i+1}" for i in range(len(scale_factors))])
+            plt.xlabel("Control Layer")
+            plt.ylabel("Scaling Factor")
+            plt.title(f"Learned Scaling Factors for Control Layers (Epoch {epoch+1})")
+            plt.ylim(0, max(2.0, max(scale_factors) * 1.1))  # Set reasonable y-axis limits
+            plt.tight_layout()
+
+            # Save figure
+            scale_viz_dir = self.trainer.output_dir / "scaling_visualizations"
+            scale_viz_dir.mkdir(exist_ok=True)
+            plt.savefig(str(scale_viz_dir / f"scaling_factors_epoch_{epoch+1}.png"))
+            plt.close()
+
+            # Log to tensorboard
+            for i, factor in enumerate(scale_factors):
+                self.trainer.writer.add_scalar(f"scaling_factors/layer_{i+1}", factor, epoch)
+
+    def remove_hooks(self):
+        """Remove all hooks to prevent memory leaks"""
+        for handle in self.hook_handles:
+            handle.remove()
+        self.hook_handles = []
 
 
 # Example usage
@@ -196,9 +316,9 @@ if __name__ == "__main__":
     condition_img = torch.randn(1, 3, 640, 640)
 
     # Run inference
-    with torch.no_grad():
-        outputs = model(input_img, condition_img)
-        print(f"Output shape: {[output.shape for output in outputs]}")
+    # with torch.no_grad():
+    outputs = model(input_img, condition_img)
+    print(f"Output shape: {[output.shape for output in outputs]}")
 
     # Training example
     print("Training only ControlNet parameters")

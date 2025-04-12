@@ -3,7 +3,6 @@ import time
 import os
 import sys
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
@@ -13,7 +12,6 @@ import json
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import cv2
-from matplotlib.figure import Figure
 from datetime import datetime
 
 # Add YOLOv5 directory to path to import YOLOv5 modules
@@ -35,7 +33,7 @@ except ImportError as e:
     # print("Will use placeholder loss function instead")
 
 # Import custom modules
-from yolov5_motion.models.yolov5_controlnet import create_combined_model
+from yolov5_motion.models.yolov5_controlnet import create_combined_model, GradientTracker
 from yolov5_motion.data.dataset_splits import create_dataset_splits, get_dataloaders
 
 # Try to import Prodigy optimizer if available
@@ -131,6 +129,7 @@ class Trainer:
         self.val_cls_losses = []
         self.lr_history = []
 
+        self.gradient_tracker = GradientTracker(self)
         # Save the arguments
         with open(self.output_dir / "args.json", "w") as f:
             json.dump(vars(args), f, indent=4)
@@ -398,7 +397,7 @@ class Trainer:
 
             # Forward pass with selected precision
             if self.precision == "fp16" or self.precision == "bf16":
-                with torch.amp.autocast(device_type="cuda"):
+                with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                     predictions = self.model(current_frames, control_images)
                     loss, metrics = self.compute_loss(predictions, targets)
             else:
@@ -714,6 +713,8 @@ class Trainer:
         """Main training loop"""
         print(f"Starting training for {self.args.epochs} epochs")
 
+        self.gradient_tracker.register_hooks()
+
         # Record start time for total training time calculation
         start_time = time.time()
 
@@ -725,6 +726,8 @@ class Trainer:
 
             # Train for one epoch
             train_loss, train_metrics = self.train_epoch(epoch)
+
+            self.gradient_tracker.visualize_gradient_norms(epoch)
 
             # Print epoch summary
             print(f"Training: loss={train_loss:.4f}, " + ", ".join([f"{k}={v:.4f}" for k, v in train_metrics.items()]))
@@ -773,6 +776,8 @@ class Trainer:
         # Save final model
         self.save_checkpoint(self.args.epochs - 1, is_best=False)
         print("Training completed!")
+
+        self.gradient_tracker.remove_hooks()
 
         # Plot and save final metrics graphs
         self.plot_metrics()
