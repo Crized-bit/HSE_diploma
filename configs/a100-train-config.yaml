@@ -13,7 +13,7 @@ model:
   controlnet_weights: null
   yolo_cfg: "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml"
   img_size: 640
-  num_classes: 80
+  num_classes: 1
   train_controlnet_only: true
 
 # Training parameters optimized for A100
@@ -27,8 +27,8 @@ training:
   val_ratio: 0.1
   
   # Prodigy works well with large batch sizes on A100
-  optimizer: "adam"  
-  lr: 0.001
+  optimizer: "prodigy"  
+  lr: 1.0
   weight_decay: 0.0005
   momentum: 0.937
   
@@ -44,7 +44,7 @@ training:
   # Checkpointing
   save_interval: 10
   log_interval: 50    # Less frequent logging for faster training
-  eval_interval: 5
+  eval_interval: 1
   
   # Resume training
   resume: null

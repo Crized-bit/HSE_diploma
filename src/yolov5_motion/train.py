@@ -365,13 +365,8 @@ class Trainer:
                 normalized_bbox[2] = bbox[2] / img_size  # normalize width
                 normalized_bbox[3] = bbox[3] / img_size  # normalize height
 
-                class_idx = 0  # Default class index if not specified
-                if "labels" in ann:
-                    if isinstance(ann["labels"], list) and len(ann["labels"]) > 0:
-                        if isinstance(ann["labels"][0], dict) and "id" in ann["labels"][0]:
-                            class_idx = ann["labels"][0]["id"]
-                        elif isinstance(ann["labels"][0], (int, float)):
-                            class_idx = ann["labels"][0]
+                # Для модели с единственным классом (человек), используем class_idx = 0
+                class_idx = 0
 
                 # Create target row [batch_idx, class_idx, x, y, w, h]
                 target_row = torch.tensor([batch_idx, class_idx, *normalized_bbox], dtype=torch.float32)
@@ -600,20 +595,10 @@ class Trainer:
 
                     # Create panel if images are available
                     if panel_images:
-                        # Resize images to same height
                         max_width = max(img.shape[1] for img in panel_images)
-                        target_height = 300  # Fixed height for panel
-
-                        resized_images = []
-                        for img in panel_images:
-                            aspect = img.shape[1] / img.shape[0]
-                            resized_width = int(target_height * aspect)
-                            resized = cv2.resize(img, (resized_width, target_height))
-                            resized_images.append(resized)
-
                         # Create vertical stack with padding to same width
                         panel = []
-                        for img in resized_images:
+                        for img in panel_images:
                             if img.shape[1] < max_width:
                                 pad_width = max_width - img.shape[1]
                                 pad = np.ones((img.shape[0], pad_width, 3), dtype=np.uint8) * 255

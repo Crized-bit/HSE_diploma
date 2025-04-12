@@ -78,8 +78,11 @@ class YOLOv5WithControlNet(nn.Module):
     def train_controlnet(self):
         """Set model to train only ControlNet parameters"""
         # Freeze YOLOv5 parameters
-        for param in self.yolo.parameters():
-            param.requires_grad = False
+        for name,param in self.yolo.named_parameters():
+            if name.startswith("model.24"):
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
 
         # Unfreeze ControlNet parameters
         for param in self.controlnet.parameters():
@@ -138,7 +141,14 @@ def create_combined_model(cfg, yolo_weights=None, controlnet_weights=None, img_s
                         state_dict = state_dict.float()
                     if hasattr(state_dict, "state_dict"):
                         state_dict = state_dict.state_dict()
-                model.yolo.load_state_dict(state_dict, strict=False)
+                current_model_dict = model.yolo.state_dict()
+                new_state_dict = {
+                    k: v if v.size() == current_model_dict[k].size() else current_model_dict[k]
+                    for k, v in zip(current_model_dict.keys(), state_dict.values())
+                }
+                missing_keys, unexpected = model.yolo.load_state_dict(new_state_dict, strict=False)
+                print("missing_keys:", missing_keys)
+                print("unexpected:", unexpected)
                 print(f"Loaded YOLOv5 weights from {yolo_weights}")
             else:
                 print(f"Warning: YOLOv5 weights file {yolo_weights} not found")
@@ -168,16 +178,17 @@ if __name__ == "__main__":
         controlnet_weights=None,  # Initialize ControlNet with zeros
         cfg="/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml",  # Use YOLOv5m configuration
         img_size=640,
+        nc=1,
     )
 
-    print(model)
+    # print(model)
     # Example of saving and loading just the ControlNet portion
     # After training
     model.save_controlnet("controlnet_weights.pt")
 
     # Later, to load a pretrained ControlNet
     new_model = create_combined_model(
-        cfg="/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml", yolo_weights=weights, controlnet_weights="controlnet_weights.pt"
+        cfg="/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml", yolo_weights=weights, controlnet_weights="controlnet_weights.pt", nc=1
     )
 
     # Example inputs (batch size 1, RGB images)
