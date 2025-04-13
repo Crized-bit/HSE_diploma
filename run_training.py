@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Simple runner script for the YOLOv5 ControlNet training.
 Creates and runs example configuration.
@@ -6,7 +5,6 @@ Creates and runs example configuration.
 
 import os
 import sys
-import yaml
 from pathlib import Path
 
 # Define default config path
@@ -18,63 +16,6 @@ def ensure_config_dir():
     config_dir = Path("configs")
     config_dir.mkdir(exist_ok=True)
     return config_dir
-
-
-def create_example_config():
-    """Create an example configuration file"""
-    config_dir = ensure_config_dir()
-    config_path = config_dir / "train_config.yaml"
-
-    # Skip if config already exists
-    if config_path.exists():
-        print(f"Config file already exists at {config_path}")
-        return config_path
-
-    # Create example configuration
-    example_config = {
-        "data": {
-            "preprocessed_dir": "/path/to/preprocessed/data",
-            "annotations_dir": "/path/to/annotations",
-            "splits_file": "/path/to/splits.json",
-            "output_dir": "./training_outputs",
-        },
-        "model": {
-            "yolo_weights": "/path/to/yolov5m.pt",
-            "controlnet_weights": None,
-            "yolo_cfg": "yolov5m.yaml",
-            "img_size": 640,
-            "num_classes": 80,
-            "train_controlnet_only": True,
-        },
-        "training": {
-            "epochs": 100,
-            "batch_size": 16,
-            "val_batch_size": 32,
-            "workers": 8,
-            "val_ratio": 0.1,
-            "optimizer": "prodigy",
-            "lr": 0.001,
-            "weight_decay": 0.0005,
-            "momentum": 0.937,
-            "loss": {
-                "box_weight": 0.05,
-                "obj_weight": 1.0,
-                "cls_weight": 0.5,
-            },
-            "precision": "bf16",
-            "save_interval": 10,
-            "log_interval": 10,
-            "eval_interval": 5,
-            "resume": None,
-        },
-    }
-
-    # Write configuration to file
-    with open(config_path, "w") as f:
-        yaml.dump(example_config, f, default_flow_style=False)
-
-    print(f"Created example configuration at {config_path}")
-    return config_path
 
 
 def run_training(config_path, additional_args=None):
@@ -112,7 +53,7 @@ if __name__ == "__main__":
 
     # Create example config if none provided
     if not args.config:
-        config_path = create_example_config()
+        raise ValueError("No configuration file provided. Please provide a path to a YAML configuration file.")
     else:
         config_path = args.config
 

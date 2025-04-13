@@ -9,10 +9,10 @@ import sys
 
 sys.path.append("/home/jovyan/p.kudrevatyh/yolov5")
 
-from models.yolo import Model as YOLOv5Model
-from models.common import Conv
-from utils.torch_utils import initialize_weights
-from utils.general import check_img_size
+from models.yolo import Model as YOLOv5Model  # type: ignore
+from models.common import Conv  # type: ignore
+from utils.torch_utils import initialize_weights  # type: ignore
+from utils.general import check_img_size  # type: ignore
 
 
 class ZeroConv(nn.Module):
@@ -74,7 +74,7 @@ class ControlNetModel(nn.Module):
                 conv_output = self.convs[i](x)
                 conv_outputs.append(conv_output)
                 i += 1
-              # save output
+            # save output
         return conv_outputs
 
 

@@ -14,7 +14,9 @@ model:
   yolo_cfg: "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml"
   img_size: 640
   num_classes: 1
-  train_controlnet_only: false
+  train_all: false
+  train_controlnet: true
+  train_head: true
 
 # Training parameters optimized for A100
 training:

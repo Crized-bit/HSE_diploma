@@ -8,9 +8,9 @@ import sys
 
 sys.path.append("/home/jovyan/p.kudrevatyh/yolov5")
 
-from models.yolo import Model as YOLOv5Model
-from utils.torch_utils import model_info
-from utils.general import check_img_size
+from models.yolo import Model as YOLOv5Model  # type: ignore
+from utils.torch_utils import model_info  # type: ignore
+from utils.general import check_img_size  # type: ignore
 
 from yolov5_motion.models.blocks import ControlNetModel
 
@@ -47,7 +47,11 @@ class YOLOv5WithControlNet(nn.Module):
         # Flag to enable/disable ControlNet during inference
         self.use_controlnet = True
 
-        print(model_info(self, verbose=True))
+        # Initially we don't train anything
+        for param in self.parameters():
+            param.requires_grad = False
+
+        # print(model_info(self, verbose=True))
 
     def forward(self, x, condition_img=None):
         """
@@ -93,17 +97,17 @@ class YOLOv5WithControlNet(nn.Module):
         for param in self.controlnet.parameters():
             param.requires_grad = True
 
-        # Freeze YOLOv5 parameters except for head
-        for name, param in self.yolo.named_parameters():
-            if name.startswith("model.24"):
-                param.requires_grad = True
-            else:
-                param.requires_grad = False
-
     def train_all(self):
         """Set model to train all parameters"""
         for param in self.parameters():
             param.requires_grad = True
+
+    def train_head(self):
+        """Set model to train only YOLOv5 head parameters"""
+        # Freeze YOLOv5 parameters except for head
+        for name, param in self.yolo.named_parameters():
+            if name.startswith("model.24"):
+                param.requires_grad = True
 
     def save_controlnet(self, path):
         """Save only the ControlNet part of the model

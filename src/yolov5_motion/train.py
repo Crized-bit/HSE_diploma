@@ -25,8 +25,8 @@ else:
 
 # Import YOLOv5 modules for loss computation and bounding box processing
 try:
-    from utils.loss import ComputeLoss
-    from utils.general import non_max_suppression, scale_boxes
+    from utils.loss import ComputeLoss  # type: ignore
+    from utils.general import non_max_suppression, scale_boxes  # type: ignore
 
     print("Successfully imported YOLOv5 loss computation modules")
 except ImportError as e:
@@ -76,7 +76,9 @@ def parse_args():
     parser.add_argument("--val_ratio", type=float, default=0.1, help="Ratio of training data to use for validation")
 
     # Training mode
-    parser.add_argument("--train_controlnet_only", action="store_true", help="Train only the ControlNet, freeze YOLOv5 weights")
+    parser.add_argument("--train_controlnet", action="store_true", help="Train only the ControlNet")
+    parser.add_argument("--train_head", action="store_true", help="Train head of YOLOv5")
+    parser.add_argument("--train_all", action="store_true", help="Train all layers of YOLOv5 and ControlNet model")
 
     # Optimizer selection
     parser.add_argument("--optimizer", type=str, default="adam", choices=["adam", "sgd", "prodigy"], help="Optimizer to use for training")
@@ -190,10 +192,15 @@ class Trainer:
             print("Using placeholder loss function (YOLOv5 loss not available)")
 
         # Set training mode
-        if args.train_controlnet_only:
-            print("Training ControlNet only - freezing YOLOv5 weights")
+        if args.train_head:
+            print("Training YOLOv5 head")
+            self.model.train_head()
+
+        if args.train_controlnet:
+            print("Training ControlNet")
             self.model.train_controlnet()
-        else:
+
+        if args.train_all:
             print("Training all parameters")
             self.model.train_all()
 
@@ -413,7 +420,7 @@ class Trainer:
             # Backward pass (no scaler needed for bf16)
             loss.backward()
 
-            torch.nn.utils.clip_grad_norm_(self.model.controlnet.parameters(), max_norm=10.0)
+            # torch.nn.utils.clip_grad_norm_(self.model.controlnet.parameters(), max_norm=10.0)
             self.optimizer.step()
 
             # Update metrics
@@ -939,7 +946,7 @@ class Trainer:
         if val_values and val_epochs:
             val_min_idx = np.argmin(val_values)
             val_max_idx = np.argmax(val_values)
-            
+
             # Add annotation for start point of validation
             plt.annotate(
                 f"Start: {val_values[0]:.4f}",
@@ -950,7 +957,7 @@ class Trainer:
                 ha="right",  # Выравнивание по правому краю
                 color="red",
             )
-            
+
             plt.annotate(
                 f"Min: {val_values[val_min_idx]:.4f}",
                 xy=(val_epochs[val_min_idx], val_values[val_min_idx]),
@@ -961,7 +968,7 @@ class Trainer:
                 color="red",
                 arrowprops=dict(arrowstyle="->", color="red", alpha=0.7),
             )
-            
+
             # Add max annotation for validation
             plt.annotate(
                 f"Max: {val_values[val_max_idx]:.4f}",
@@ -1177,7 +1184,9 @@ def main():
     args.yolo_cfg = config_dict["model"]["yolo_cfg"]
     args.img_size = config_dict["model"]["img_size"]
     args.num_classes = config_dict["model"]["num_classes"]
-    args.train_controlnet_only = config_dict["model"]["train_controlnet_only"]
+    args.train_controlnet = config_dict["model"]["train_controlnet"]
+    args.train_head = config_dict["model"]["train_head"]
+    args.train_all = config_dict["model"]["train_all"]
 
     # Training parameters
     args.epochs = config_dict["training"]["epochs"]
