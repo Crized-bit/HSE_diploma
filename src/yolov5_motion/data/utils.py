@@ -122,33 +122,3 @@ def draw_bounding_boxes(image, annotations, color=(0, 255, 0), thickness=2):
                 cv2.putText(img_with_boxes, label_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, thickness)
 
     return img_with_boxes
-
-
-def compute_iou(box1, box2):
-    """
-    Compute IoU (Intersection over Union) between two bounding boxes.
-
-    Args:
-        box1: First box in format [x1, y1, x2, y2]
-        box2: Second box in format [x1, y1, x2, y2]
-
-    Returns:
-        IoU value between 0 and 1
-    """
-    # Calculate intersection area
-    x1 = max(box1[0], box2[0])
-    y1 = max(box1[1], box2[1])
-    x2 = min(box1[2], box2[2])
-    y2 = min(box1[3], box2[3])
-
-    intersection = max(0, x2 - x1) * max(0, y2 - y1)
-
-    # Calculate areas of both boxes
-    box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
-    box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
-
-    # Calculate union area
-    union = box1_area + box2_area - intersection
-
-    # Return IoU
-    return intersection / union if union > 0 else 0

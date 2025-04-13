@@ -25,7 +25,7 @@ def main():
         default="/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations",
         help="Directory containing annotation files",
     )
-    parser.add_argument("--output_dir", type=str, default="/home/jovyan/p.kudrevatyh/temp", help="Directory to save preprocessed frames")
+    parser.add_argument("--output_dir", type=str, default="/home/jovyan/p.kudrevatyh/diff", help="Directory to save preprocessed frames")
     parser.add_argument(
         "--splits_file", type=str, default="/home/jovyan/p.kudrevatyh/yolov5_motion/data/splits.json", help="Path to splits JSON file"
     )
@@ -47,7 +47,7 @@ def main():
     args = parser.parse_args()
 
     # Step 1: Preprocess videos if not skipped
-    if not True:
+    if True:
         print("\n===== Preprocessing Videos =====")
         start_time = time.time()
         preprocess_videos(

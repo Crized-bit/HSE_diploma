@@ -2,7 +2,7 @@
 
 # Data paths
 data:
-  preprocessed_dir: "/home/jovyan/p.kudrevatyh/temp"
+  preprocessed_dir: "/home/jovyan/p.kudrevatyh/optical_flow"
   annotations_dir: "/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations"
   splits_file: "/home/jovyan/p.kudrevatyh/yolov5_motion/data/splits.json"
   output_dir: "./a100_training_outputs"
@@ -34,9 +34,9 @@ training:
   
   # Loss weights
   loss:
-    box_weight: 0.05
-    obj_weight: 1.0
-    cls_weight: 0.5
+    box_weight: 0.0539
+    obj_weight: 0.632  # obj loss gain
+    cls_weight: 0.299
   
   # BF16 precision is optimal for A100
   precision: "bf16"
@@ -48,3 +48,8 @@ training:
   
   # Resume training
   resume: null
+
+  detection:
+    conf_thres: 0.25
+    iou_thres: 0.45
+    max_det: 100

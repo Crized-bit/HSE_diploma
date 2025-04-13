@@ -291,6 +291,7 @@ class GradientTracker:
 
 # Example usage
 if __name__ == "__main__":
+    from torchviz import make_dot
     # Create model with pretrained weights
     weights = "/home/jovyan/p.kudrevatyh/yolov5m.pt"
     model = create_combined_model(
@@ -315,9 +316,11 @@ if __name__ == "__main__":
     input_img = torch.randn(1, 3, 640, 640)
     condition_img = torch.randn(1, 3, 640, 640)
 
+    
     # Run inference
     # with torch.no_grad():
     outputs = model(input_img, condition_img)
+    make_dot(tuple(outputs), params=dict(list(model.named_parameters()))).render("rnn_torchviz", format="png")
     print(f"Output shape: {[output.shape for output in outputs]}")
 
     # Training example

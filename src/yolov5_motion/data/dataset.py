@@ -53,7 +53,8 @@ class PreprocessedVideoDataset(Dataset):
 
     def _adjust_bbox_for_padding(self, bbox, original_size, padded_size=(640, 640)):
         """
-        Adjust bounding box coordinates for padded image.
+        Adjust bounding box coordinates for padded image and ensure it stays within
+        the actual image area (not in padding).
 
         Args:
             bbox: Original bounding box [center_x, center_y, width, height]
@@ -61,7 +62,8 @@ class PreprocessedVideoDataset(Dataset):
             padded_size: Padded image size (width, height)
 
         Returns:
-            Adjusted bounding box
+            Adjusted and clipped bounding box [center_x, center_y, width, height] or None if
+            the box would have zero area after clipping
         """
         orig_w, orig_h = original_size
         pad_w, pad_h = padded_size
@@ -77,16 +79,43 @@ class PreprocessedVideoDataset(Dataset):
         pad_left = (pad_w - new_w) // 2
         pad_top = (pad_h - new_h) // 2
 
-        # Unpack bbox
-        center_x, center_y, width, height = bbox
+        # Define valid image region boundaries
+        min_x = pad_left
+        min_y = pad_top
+        max_x = pad_left + new_w
+        max_y = pad_top + new_h
 
-        # Scale coordinates
+        # Unpack and scale bbox
+        center_x, center_y, width, height = bbox
         center_x = center_x * scale + pad_left
         center_y = center_y * scale + pad_top
         width = width * scale
         height = height * scale
 
-        return [center_x, center_y, width, height]
+        # Calculate box edges
+        left = center_x - width / 2
+        top = center_y - height / 2
+        right = center_x + width / 2
+        bottom = center_y + height / 2
+
+        # Clip the box to the valid region
+        new_left = max(left, min_x)
+        new_top = max(top, min_y)
+        new_right = min(right, max_x)
+        new_bottom = min(bottom, max_y)
+
+        # Check if the clipped box has valid dimensions
+        if new_right <= new_left or new_bottom <= new_top:
+            # Box is completely outside valid region or has zero area after clipping
+            return None
+
+        # Recalculate box parameters after clipping
+        new_width = new_right - new_left
+        new_height = new_bottom - new_top
+        new_center_x = new_left + new_width / 2
+        new_center_y = new_top + new_height / 2
+
+        return [new_center_x, new_center_y, new_width, new_height]
 
     def _create_samples(self) -> List[Dict]:
         """
@@ -129,8 +158,13 @@ class PreprocessedVideoDataset(Dataset):
 
             for entity in annotation["entities"]:
                 # Skip reflections
-                if "labels" in entity and isinstance(entity["labels"], dict) and entity["labels"].get("reflection") == 1:
-                    continue  # Skip this annotation
+                if "labels" in entity and isinstance(entity["labels"], dict):
+                    if (
+                        entity["labels"].get("reflection") == 1
+                        or entity["labels"].get("severly_occluded_person") == 1
+                        or entity["labels"].get("crowd") == 1
+                    ):
+                        continue  # Skip this annotation
 
                 frame_idx = entity["blob"]["frame_idx"]
 
@@ -149,6 +183,8 @@ class PreprocessedVideoDataset(Dataset):
                 # Adjust bbox for padding if resolution is available
                 if resolution:
                     bbox = self._adjust_bbox_for_padding(bbox, resolution)
+                    if not bbox:
+                        continue
 
                 frame_annotations[frame_idx].append(
                     {"bbox": bbox, "id": entity["id"], "labels": entity["labels"], "confidence": entity["confidence"]}
