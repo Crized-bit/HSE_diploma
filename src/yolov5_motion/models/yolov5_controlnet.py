@@ -16,7 +16,7 @@ from yolov5_motion.models.blocks import ControlNetModel
 
 
 class YOLOv5WithControlNet(nn.Module):
-    def __init__(self, cfg="yolov5m.yaml", ch=3, nc=80, anchors=None, yolo_weights=None):
+    def __init__(self, cfg="yolov5m.yaml", ch=3, nc=80, anchors=None, yolo_weights=None, alpha: float = 1.0):
         """
         Initializes YOLOv5 model with ControlNet integration
 
@@ -43,6 +43,7 @@ class YOLOv5WithControlNet(nn.Module):
         # Initialize ControlNet with the YOLOv5 model
         self.controlnet = ControlNetModel(self.yolo)
 
+        self.alpha = alpha
         # Flag to enable/disable ControlNet during inference
         self.use_controlnet = True
 
@@ -68,7 +69,8 @@ class YOLOv5WithControlNet(nn.Module):
         control_indices = [17, 19, 22]
         # Initial processing through YOLO backbone
         y = []  # outputs
-        for i, m in enumerate(self.yolo.model):
+        i = 0
+        for idx, m in enumerate(self.yolo.model):
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]
 
@@ -76,9 +78,9 @@ class YOLOv5WithControlNet(nn.Module):
             x = m(x)
 
             # Store feature map before modifications if it's a control point
-            if self.use_controlnet and condition_img is not None and i in control_indices:
-                x += control_outputs[control_indices.index(i)]
-
+            if self.use_controlnet and condition_img is not None and idx in control_indices:
+                x = x + self.alpha * control_outputs[i]
+                i += 1
             # Store output
             y.append(x if m.i in self.yolo.save else None)
 
@@ -86,16 +88,17 @@ class YOLOv5WithControlNet(nn.Module):
 
     def train_controlnet(self):
         """Set model to train only ControlNet parameters"""
-        # Freeze YOLOv5 parameters
+
+        # Unfreeze ControlNet parameters
+        for param in self.controlnet.parameters():
+            param.requires_grad = True
+
+        # Freeze YOLOv5 parameters except for head
         for name, param in self.yolo.named_parameters():
             if name.startswith("model.24"):
                 param.requires_grad = True
             else:
                 param.requires_grad = False
-
-        # Unfreeze ControlNet parameters
-        for param in self.controlnet.parameters():
-            param.requires_grad = True
 
     def train_all(self):
         """Set model to train all parameters"""
@@ -292,6 +295,7 @@ class GradientTracker:
 # Example usage
 if __name__ == "__main__":
     from torchviz import make_dot
+
     # Create model with pretrained weights
     weights = "/home/jovyan/p.kudrevatyh/yolov5m.pt"
     model = create_combined_model(
@@ -316,7 +320,6 @@ if __name__ == "__main__":
     input_img = torch.randn(1, 3, 640, 640)
     condition_img = torch.randn(1, 3, 640, 640)
 
-    
     # Run inference
     # with torch.no_grad():
     outputs = model(input_img, condition_img)

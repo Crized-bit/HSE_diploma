@@ -23,7 +23,7 @@ class ZeroConv(nn.Module):
         # nn.init.zeros_(self.conv.bias)
 
     def forward(self, x):
-        return self.conv(x)
+        return x + self.conv(x)
 
 
 class ControlNetModel(nn.Module):
@@ -31,7 +31,6 @@ class ControlNetModel(nn.Module):
         super().__init__()
         # Clone YOLOv5 backbone structure
         self.backbone = nn.ModuleList([copy.deepcopy(module) for module in yolo_model.model[:10]])
-        self.save = yolo_model.save
         self.convs_idx = [4, 6, 9]
 
         # Convs for ControlNet
@@ -39,36 +38,43 @@ class ControlNetModel(nn.Module):
             [
                 nn.Sequential(
                     ZeroConv(192, 192),
+                    nn.SiLU(),
                     ZeroConv(192, 192),
+                    nn.SiLU(),
                     ZeroConv(192, 192),
+                    nn.SiLU(),
                 ),
                 nn.Sequential(
                     ZeroConv(384, 384),
+                    nn.SiLU(),
                     ZeroConv(384, 384),
+                    nn.SiLU(),
                     ZeroConv(384, 384),
+                    nn.SiLU(),
                 ),
                 nn.Sequential(
                     ZeroConv(768, 768),
+                    nn.SiLU(),
                     ZeroConv(768, 768),
+                    nn.SiLU(),
                     ZeroConv(768, 768),
+                    nn.SiLU(),
                 ),
             ]
         )
 
     def forward(self, x):
         # Get features from main model backbone
-        y = []  # outputs
         conv_outputs = []
         i = 0
         for idx, m in enumerate(self.backbone):
-            if m.f != -1:  # if not from previous layer
-                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             x = m(x)  # run
+
             if idx in self.convs_idx:
                 conv_output = self.convs[i](x)
                 conv_outputs.append(conv_output)
                 i += 1
-            y.append(x if m.i in self.save else None)  # save output
+              # save output
         return conv_outputs
 
 

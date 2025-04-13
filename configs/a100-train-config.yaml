@@ -2,7 +2,7 @@
 
 # Data paths
 data:
-  preprocessed_dir: "/home/jovyan/p.kudrevatyh/optical_flow"
+  preprocessed_dir: "/home/jovyan/p.kudrevatyh/bg_subtraction"
   annotations_dir: "/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations"
   splits_file: "/home/jovyan/p.kudrevatyh/yolov5_motion/data/splits.json"
   output_dir: "./a100_training_outputs"
@@ -14,7 +14,7 @@ model:
   yolo_cfg: "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml"
   img_size: 640
   num_classes: 1
-  train_controlnet_only: true
+  train_controlnet_only: false
 
 # Training parameters optimized for A100
 training:
@@ -44,7 +44,7 @@ training:
   # Checkpointing
   save_interval: 10
   log_interval: 50    # Less frequent logging for faster training
-  eval_interval: 5
+  eval_interval: 1
   
   # Resume training
   resume: null

@@ -192,25 +192,10 @@ class PreprocessedVideoDataset(Dataset):
 
             # Create a sample for each frame with annotations
             for frame_idx, annotations in frame_annotations.items():
-                # Look up the prev_frame_idx from metadata if available
-                prev_frame_idx = None
-
-                # Try to get from metadata
-                if (
-                    video_id in self.metadata["videos"]
-                    and "frame_to_prev_frame" in self.metadata["videos"][video_id]
-                    and str(frame_idx) in self.metadata["videos"][video_id]["frame_to_prev_frame"]
-                ):
-                    prev_frame_idx = self.metadata["videos"][video_id]["frame_to_prev_frame"][str(frame_idx)]
-                else:
-                    # Calculate frame time in seconds and previous frame index
-                    frame_time = frame_idx / fps
-                    prev_frame_time = max(0, frame_time - self.prev_frame_time_diff)
-                    prev_frame_idx = max(0, int(prev_frame_time * fps))
 
                 # Construct file paths
                 current_frame_path = video_dir / f"frame_{frame_idx:06d}.jpg"
-                control_image_path = self.control_dir / video_id / f"control_{frame_idx:06d}_{prev_frame_idx:06d}.jpg"
+                control_image_path = self.control_dir / video_id / f"control_{frame_idx:06d}.jpg"
 
                 # Skip if files don't exist
                 if not current_frame_path.exists():
@@ -218,19 +203,17 @@ class PreprocessedVideoDataset(Dataset):
                     continue
 
                 if not control_image_path.exists():
-                    print(f"Warning: Missing control image for {video_id}, frame {frame_idx}, prev {prev_frame_idx}")
+                    print(f"Warning: Missing control image for {video_id}, frame {frame_idx}")
                     continue
 
                 samples.append(
                     {
                         "video_id": video_id,
                         "frame_idx": frame_idx,
-                        "prev_frame_idx": prev_frame_idx,
                         "annotations": annotations,
                         "current_frame_path": str(current_frame_path),
                         "control_image_path": str(control_image_path),
                         "frame_time": frame_idx / fps,
-                        "prev_frame_time": prev_frame_idx / fps if prev_frame_idx is not None else None,
                     }
                 )
 

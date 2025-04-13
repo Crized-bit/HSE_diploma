@@ -340,16 +340,6 @@ class Trainer:
             metrics = {"box_loss": box_loss.item(), "obj_loss": obj_loss.item(), "cls_loss": cls_loss.item(), "total_loss": loss.item()}
 
             return loss, metrics
-        else:
-            # Placeholder loss calculation if YOLOv5 loss is not available
-            box_loss = torch.tensor(0.0, device=self.device)
-            obj_loss = torch.tensor(0.0, device=self.device)
-            cls_loss = torch.tensor(0.0, device=self.device)
-
-            # Weighted sum of losses
-            loss = self.args.box_weight * box_loss + self.args.obj_weight * obj_loss + self.args.cls_weight * cls_loss
-
-            return loss, {"box_loss": box_loss.item(), "obj_loss": obj_loss.item(), "cls_loss": cls_loss.item(), "total_loss": loss.item()}
 
     def _convert_targets_to_yolo_format(self, targets):
         """
@@ -423,7 +413,7 @@ class Trainer:
             # Backward pass (no scaler needed for bf16)
             loss.backward()
 
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
+            torch.nn.utils.clip_grad_norm_(self.model.controlnet.parameters(), max_norm=10.0)
             self.optimizer.step()
 
             # Update metrics

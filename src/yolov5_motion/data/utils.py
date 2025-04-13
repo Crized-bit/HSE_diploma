@@ -2,33 +2,83 @@ import numpy as np
 import cv2
 
 
-def create_control_image(prev_image: np.ndarray, cur_image: np.ndarray) -> np.ndarray:
+def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = "flow") -> np.ndarray:
     """
-    Create a control image from previous and current frames.
+    Create a control image from a stack of previous frames and current frame.
 
     Args:
-        prev_image: Previous frame as a numpy array (H, W, C)
+        frames_stack: List of previous frames as numpy arrays [(H, W, C)], ordered from oldest to newest
         cur_image: Current frame as a numpy array (H, W, C)
+        mode: Motion representation mode:
+            - "flow": Optical flow visualization (Farneback method)
+            - "difference": Simple frame difference with the most recent previous frame
+            - "diff_color": Colored frame difference with the most recent previous frame
+            - "bg_subtraction": Background subtraction using multiple frames history
 
     Returns:
         Control image as a numpy array (H, W, C)
     """
+    # Get the most recent previous frame
+    prev_image = frames_stack[-1] if frames_stack else None
+
+    if prev_image is None:
+        # If no previous frames available, return grayscale version of current
+        return cv2.cvtColor(cv2.cvtColor(cur_image, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
+
     # Convert images to grayscale
     prev_gray = cv2.cvtColor(prev_image, cv2.COLOR_RGB2GRAY)
     cur_gray = cv2.cvtColor(cur_image, cv2.COLOR_RGB2GRAY)
 
-    # Calculate optical flow using Farneback method
-    flow = cv2.calcOpticalFlowFarneback(prev_gray, cur_gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+    if mode == "flow":
+        # Calculate optical flow using Farneback method
+        flow = cv2.calcOpticalFlowFarneback(prev_gray, cur_gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+        # Convert flow to RGB using HSV color wheel
+        mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+        hsv = np.zeros((cur_image.shape[0], cur_image.shape[1], 3), dtype=np.uint8)
+        hsv[..., 0] = ang * 180 / np.pi / 2
+        hsv[..., 1] = 255
+        hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
+        return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
 
-    # Convert flow to RGB using HSV color wheel
-    mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-    hsv = np.zeros((prev_image.shape[0], prev_image.shape[1], 3), dtype=np.uint8)
-    hsv[..., 0] = ang * 180 / np.pi / 2
-    hsv[..., 1] = 255
-    hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
-    rgb_flow = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+    elif mode == "difference":
+        # Calculate difference between current and previous frames
+        diff = cv2.absdiff(prev_gray, cur_gray)
+        # Enhance contrast for better visualization
+        diff = cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX)
+        diff_rgb = cv2.cvtColor(diff, cv2.COLOR_GRAY2RGB)
+        return diff_rgb
 
-    return rgb_flow
+    elif mode == "diff_color":
+        # Calculate difference in each color channel
+        diff_b = cv2.absdiff(prev_image[:, :, 0], cur_image[:, :, 0])
+        diff_g = cv2.absdiff(prev_image[:, :, 1], cur_image[:, :, 1])
+        diff_r = cv2.absdiff(prev_image[:, :, 2], cur_image[:, :, 2])
+        # Combine channels
+        diff_color = cv2.merge([diff_b, diff_g, diff_r])
+        # Enhance contrast
+        diff_color = cv2.normalize(diff_color, None, 0, 255, cv2.NORM_MINMAX)
+        return diff_color
+
+    elif mode == "bg_subtraction":
+        # Use proper background subtraction with multiple frames
+
+        # Create background model from frame stack
+        bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=len(frames_stack) + 1, varThreshold=16, detectShadows=True)
+
+        # Add all previous frames to the model
+        for frame in frames_stack:
+            # frame_gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            bg_subtractor.apply(frame)
+
+        # Get foreground mask for current frame
+        fg_mask = bg_subtractor.apply(cur_image)
+
+        # Create control image from foreground mask
+        result = cv2.cvtColor(fg_mask, cv2.COLOR_GRAY2RGB)
+        return result
+
+    else:
+        raise ValueError(f"Unknown mode: {mode}. Valid modes are 'flow', 'difference', 'diff_color', 'bg_subtraction'")
 
 
 def cxcywh_to_xyxy(bbox, img_width=640, img_height=640):

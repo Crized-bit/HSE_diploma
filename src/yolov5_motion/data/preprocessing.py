@@ -10,7 +10,14 @@ from yolov5_motion.data.utils import create_control_image
 
 
 def preprocess_videos(
-    videos_dir, annotations_dir, output_dir, resize_to=(640, 640), pad_color=(114, 114, 114), num_workers=8, prev_frame_time_diff=1.0
+    videos_dir,
+    annotations_dir,
+    output_dir,
+    resize_to=(640, 640),
+    pad_color=(114, 114, 114),
+    num_workers=8,
+    prev_frame_time_diff=1.0,
+    control_mode: str = "flow",
 ):
     """
     Preprocess videos by extracting frames and computing control images, saving them as individual images.
@@ -132,7 +139,7 @@ def preprocess_videos(
         )
 
     # Define a function to process an entire video
-    def process_video(video_item):
+    def process_video(video_item, n_control_frames=15):
         video_id = video_item["video_id"]
         video_path = video_item["video_path"]
         frames_to_extract = video_item["frames"]
@@ -141,6 +148,7 @@ def preprocess_videos(
 
         try:
             print(f"Processing video {video_id} with {len(frames_to_extract)} frames...")
+            print(f"Using {n_control_frames} control frames for each target frame")
 
             # Create output directories for this video
             video_output_dir = frames_path / video_id
@@ -152,20 +160,30 @@ def preprocess_videos(
             # Open video
             vr = VideoReader(video_path, ctx=cpu(0))
 
-            # Compute control frame pairs
-            control_frame_pairs = []
+            # Compute multiple control frames for each target frame
+            all_control_frames = []
             for frame_idx in frames_to_extract:
                 frame_time = frame_idx / fps
-                prev_frame_time = max(0, frame_time - prev_frame_time_diff)
-                prev_frame_idx = max(0, int(prev_frame_time * fps))
-                control_frame_pairs.append((frame_idx, prev_frame_idx))
+                control_frames = set()
 
-            # Get unique indices to read (includes both frames_to_extract and their control frames)
+                for i in range(n_control_frames):
+                    # Calculate time for each control frame going back in time
+                    # The total time span will be prev_frame_time_diff * n_control_frames
+                    control_time_diff = prev_frame_time_diff * (i + 1)
+                    control_frame_time = max(0, frame_time - control_time_diff)
+                    control_frame_idx = max(0, int(control_frame_time * fps))
+                    control_frames.add(control_frame_idx)
+
+                all_control_frames.append((frame_idx, list(control_frames)))
+
+            # Get unique indices to read (includes both frames_to_extract and all their control frames)
             all_indices = set(frames_to_extract)
+            for _, control_frames in all_control_frames:
+                all_indices.update(control_frames)
             all_indices = sorted(all_indices)
 
             # Read all needed frames in smaller chunks to avoid memory issues
-            chunk_size = 500  # Process 100 frames at a time
+            chunk_size = 500  # Process frames in chunks to avoid memory issues
             frames_dict = {}
 
             for i in range(0, len(all_indices), chunk_size):
@@ -177,25 +195,25 @@ def preprocess_videos(
                 except Exception as e:
                     print(f"Error reading frames chunk from {video_path}: {e}")
 
-            # Process each frame and its control pair
+            # Process each frame and its control frames
             for frame_idx in tqdm(frames_to_extract, desc=f"Processing {video_id} frames"):
                 if frame_idx not in frames_dict:
                     continue
 
-                # Identify the corresponding control frame
-                prev_frame_idx = None
-                for curr, prev in control_frame_pairs:
+                # Get the corresponding control frames
+                control_frames_indices = None
+                for curr, controls in all_control_frames:
                     if curr == frame_idx:
-                        prev_frame_idx = prev
+                        control_frames_indices = controls
                         break
 
-                if prev_frame_idx is None or prev_frame_idx not in frames_dict:
+                if control_frames_indices is None:
                     continue
 
+                # Get the target frame
                 frame = frames_dict[frame_idx]
-                prev_frame = frames_dict[prev_frame_idx]
 
-                # Resize and pad frame
+                # Resize and prepare the target frame
                 h, w = frame.shape[:2]
                 target_w, target_h = resize_to
 
@@ -206,13 +224,11 @@ def preprocess_videos(
                 new_w = int(w * scale)
                 new_h = int(h * scale)
 
-                # Resize images
+                # Resize target frame
                 resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-                resized_prev = cv2.resize(prev_frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
                 # Create target image with padding color
                 target_image = np.ones((target_h, target_w, 3), dtype=np.uint8) * np.array(pad_color, dtype=np.uint8)
-                target_prev = np.ones((target_h, target_w, 3), dtype=np.uint8) * np.array(pad_color, dtype=np.uint8)
 
                 # Calculate padding
                 pad_w = (target_w - new_w) // 2
@@ -220,26 +236,42 @@ def preprocess_videos(
 
                 # Place resized image on target image
                 target_image[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = resized
-                target_prev[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = resized_prev
 
                 # Save frame as JPEG
                 frame_output_path = video_output_dir / f"frame_{frame_idx:06d}.jpg"
                 cv2.imwrite(str(frame_output_path), cv2.cvtColor(target_image, cv2.COLOR_RGB2BGR))
 
-                # Save previous frame if it has annotations
-                if prev_frame_idx in has_annotations:
-                    prev_frame_output_path = video_output_dir / f"frame_{prev_frame_idx:06d}.jpg"
-                    cv2.imwrite(str(prev_frame_output_path), cv2.cvtColor(target_prev, cv2.COLOR_RGB2BGR))
+                # Process each control frame
+                preprocessed_control_frames = []
+                for i, control_frame_idx in enumerate(control_frames_indices):
+                    if control_frame_idx not in frames_dict:
+                        continue
+
+                    control_frame = frames_dict[control_frame_idx]
+
+                    # Resize control frame
+                    resized_control = cv2.resize(control_frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+                    # Create control image with padding
+                    target_control = np.ones((target_h, target_w, 3), dtype=np.uint8) * np.array(pad_color, dtype=np.uint8)
+                    target_control[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = resized_control
+
+                    preprocessed_control_frames.append(target_control)
 
                 # Generate and save control image
-                control_image = create_control_image(target_prev, target_image)
-                control_output_path = control_output_dir / f"control_{frame_idx:06d}_{prev_frame_idx:06d}.jpg"
+                control_image = create_control_image(preprocessed_control_frames, target_image, control_mode)
+
+                # Save with index to differentiate between multiple control frames
+                control_output_path = control_output_dir / f"control_{frame_idx:06d}.jpg"
                 cv2.imwrite(str(control_output_path), cv2.cvtColor(control_image, cv2.COLOR_RGB2BGR))
 
             # Clear memory
             del frames_dict
 
             return video_id, len(frames_to_extract)
+        except Exception as e:
+            print(f"Error processing video {video_id}: {e}")
+            return video_id, 0
 
         except Exception as e:
             print(f"Error processing video {video_id} ({video_path}): {e}")
@@ -287,25 +319,8 @@ def preprocess_videos(
             metadata["videos"][video_id] = {
                 "frames": sorted(list(video_info["frames"])),
                 "annotation_frames": sorted(list(frames_with_annotations.get(video_id, set()))),
-                "resolution": video_resolutions.get(video_id, (0, 0)),
-                "frame_to_prev_frame": {},
+                "resolution": video_resolutions.get(video_id, (0, 0))
             }
-
-        # Get fps for this video
-        fps = video_fps_mapping.get(video_id)
-        if fps is None:
-            print(f"Warning: Could not find fps for video {video_id}, skipping metadata")
-            continue
-
-        # Process annotation frames for this video to create frame_to_prev_frame mapping
-        for frame_idx in frames_with_annotations.get(video_id, set()):
-            # Compute previous frame index
-            frame_time = frame_idx / fps
-            prev_frame_time = max(0, frame_time - prev_frame_time_diff)
-            prev_frame_idx = max(0, int(prev_frame_time * fps))
-
-            # Store the mapping
-            metadata["videos"][video_id]["frame_to_prev_frame"][str(frame_idx)] = prev_frame_idx
 
     # Save metadata to output directory
     print("Saving metadata...")
