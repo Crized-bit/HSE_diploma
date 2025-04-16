@@ -1,14 +1,7 @@
-"""
-Simple runner script for the YOLOv5 ControlNet training.
-Creates and runs example configuration.
-"""
-
 import os
 import sys
 from pathlib import Path
 
-# Define default config path
-DEFAULT_CONFIG_PATH = "configs/train_config.yaml"
 
 
 def ensure_config_dir():

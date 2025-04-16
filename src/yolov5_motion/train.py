@@ -80,6 +80,9 @@ def parse_args():
     parser.add_argument("--train_head", action="store_true", help="Train head of YOLOv5")
     parser.add_argument("--train_all", action="store_true", help="Train all layers of YOLOv5 and ControlNet model")
 
+    # Augmentation parameters
+    parser.add_argument("--augment", action="store_true", help="Apply data augmentation")
+    parser.add_argument("--augment_prob", type=float, default=0.5, help="Probability of applying data augmentation")
     # Optimizer selection
     parser.add_argument("--optimizer", type=str, default="adam", choices=["adam", "sgd", "prodigy"], help="Optimizer to use for training")
 
@@ -211,6 +214,8 @@ class Trainer:
             annotations_dir=args.annotations_dir,
             splits_file=args.splits_file,
             val_ratio=args.val_ratio,
+            augment=args.augment,  # Enable augmentation
+            augment_prob=args.augment_prob,
         )
 
         self.dataloaders = get_dataloaders(datasets=self.datasets, batch_size=args.batch_size, num_workers=args.workers)
@@ -231,7 +236,7 @@ class Trainer:
 
         # Setup optimizer
         self.optimizer = self._create_optimizer()
-
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, self.args.epochs)
         # Resume training if specified
         self.start_epoch = 0
         if args.resume:
@@ -263,7 +268,7 @@ class Trainer:
                 print("Prodigy optimizer requested but not available. Using Adam instead.")
                 return optim.Adam(parameters, lr=self.args.lr, weight_decay=self.args.weight_decay)
             else:
-                return Prodigy(parameters, lr=self.args.lr, weight_decay=self.args.weight_decay)
+                return Prodigy(parameters, lr=self.args.lr, weight_decay=self.args.weight_decay, safeguard_warmup=False, use_bias_correction=True)
         else:
             print(f"Unknown optimizer {self.args.optimizer}, using Adam")
             return optim.Adam(parameters, lr=self.args.lr, weight_decay=self.args.weight_decay)
@@ -420,7 +425,7 @@ class Trainer:
             # Backward pass (no scaler needed for bf16)
             loss.backward()
 
-            # torch.nn.utils.clip_grad_norm_(self.model.controlnet.parameters(), max_norm=10.0)
+            torch.nn.utils.clip_grad_norm_(self.model.controlnet.parameters(), max_norm=10.0)
             self.optimizer.step()
 
             # Update metrics
@@ -451,7 +456,7 @@ class Trainer:
                     self.writer.add_scalar("train/lr", param_group["lr"], self.global_step)
 
             self.global_step += 1
-
+        self.scheduler.step()
         # Compute average metrics for the epoch
         num_batches = len(self.dataloaders["train"])
         avg_loss = epoch_loss / num_batches
@@ -1195,6 +1200,10 @@ def main():
     args.workers = config_dict["training"]["workers"]
     args.val_ratio = config_dict["training"]["val_ratio"]
 
+    # Augmentation settings
+    args.augment = config_dict["training"]["augment"]
+    args.augment_prob = config_dict["training"]["augment_prob"]
+    
     # Optimizer settings
     args.optimizer = config_dict["training"]["optimizer"]
     args.lr = config_dict["training"]["lr"]

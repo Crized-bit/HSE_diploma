@@ -70,7 +70,7 @@ class YOLOv5WithControlNet(nn.Module):
             control_outputs = self.controlnet(condition_img)
 
         # Store intermediate feature maps that will be modified by ControlNet
-        control_indices = [17, 19, 22]
+        control_indices = [17, 18, 19, 20, 22, 23]
         # Initial processing through YOLO backbone
         y = []  # outputs
         i = 0

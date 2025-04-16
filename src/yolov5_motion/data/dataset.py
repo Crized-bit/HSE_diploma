@@ -1,10 +1,12 @@
 import json
 import torch
-import numpy as np
+
+# import numpy as np
 import cv2
 from torch.utils.data import Dataset, DataLoader
 from typing import Dict, List, Any
 from pathlib import Path
+import albumentations as A
 
 
 class PreprocessedVideoDataset(Dataset):
@@ -17,7 +19,8 @@ class PreprocessedVideoDataset(Dataset):
         preprocessed_dir: str,
         annotations_dir: str = "./annotations",
         prev_frame_time_diff: float = None,  # Time difference in seconds
-        transform=None,
+        augment: bool = False,
+        augment_prob: float = 0.5,
     ):
         """
         Initialize the dataset.
@@ -32,9 +35,38 @@ class PreprocessedVideoDataset(Dataset):
         self.frames_dir = self.preprocessed_dir / "frames"
         self.control_dir = self.preprocessed_dir / "control_images"
         self.annotations_dir = Path(annotations_dir)
-        self.transform = transform
         self.prev_frame_time_diff = prev_frame_time_diff
+        self.augment = augment
 
+        # Setup augmentations if enabled
+        if self.augment:
+            self.aug_transform = A.Compose(
+                [
+                    # Spatial augmentations that apply to both image and control
+                    A.HorizontalFlip(p=augment_prob),
+                    A.RandomResizedCrop(size=(640, 640), scale=(0.8, 1.0), p=augment_prob),
+                    A.Rotate(limit=15, p=augment_prob),
+                    # Color augmentations only for the input image
+                    A.OneOf(
+                        [
+                            A.RandomBrightnessContrast(p=1.0),
+                            A.HueSaturationValue(p=1.0),
+                            A.RGBShift(p=1.0),
+                        ],
+                        p=augment_prob,
+                    ),
+                    # Noise and blur
+                    A.OneOf(
+                        [
+                            A.GaussNoise(p=1.0),
+                            A.GaussianBlur(p=1.0),
+                            A.MotionBlur(p=1.0),
+                        ],
+                        p=augment_prob * 0.5,
+                    ),  # Lower probability for these
+                ],
+                bbox_params=A.BboxParams(format="coco", label_fields=["class_labels"]),  # [x_min, y_min, width, height]
+            )
         # Load metadata
         metadata_path = self.preprocessed_dir / "metadata.json"
         with open(metadata_path, "r") as f:
@@ -242,14 +274,35 @@ class PreprocessedVideoDataset(Dataset):
         control_image = cv2.imread(sample["control_image_path"])
         control_image = cv2.cvtColor(control_image, cv2.COLOR_BGR2RGB)
 
+        # Extract bboxes for augmentation
+        bboxes = []
+        class_labels = []
+        for ann in sample["annotations"]:
+            # Convert from center format to COCO format (xmin, ymin, width, height)
+            cx, cy, w, h = ann["bbox"]
+            xmin = cx - w / 2
+            ymin = cy - h / 2
+            bboxes.append([xmin, ymin, w, h])
+            class_labels.append(0)  # Assuming single class for simplicity
+
+        # Apply augmentations if enabled
+        if self.augment and bboxes:
+            augmented = self.aug_transform(image=current_frame, masks=[control_image], bboxes=bboxes, class_labels=class_labels)
+
+            current_frame = augmented["image"]
+            control_image = augmented["masks"][0]
+
+            # Update annotations with augmented bboxes
+            for i, bbox in enumerate(augmented["bboxes"]):
+                xmin, ymin, w, h = bbox
+                # Convert back to center format
+                cx = xmin + w / 2
+                cy = ymin + h / 2
+                sample["annotations"][i]["bbox"] = [cx, cy, w, h]
+
         # Convert frames to torch tensors (C, H, W format)
         current_frame_tensor = torch.from_numpy(current_frame).permute(2, 0, 1).float() / 255.0
         control_tensor = torch.from_numpy(control_image).permute(2, 0, 1).float() / 255.0
-
-        # Apply transforms if specified
-        if self.transform:
-            current_frame_tensor = self.transform(current_frame_tensor)
-            control_tensor = self.transform(control_tensor)
 
         return {
             "current_frame": current_frame_tensor,
@@ -276,7 +329,8 @@ def get_dataloader(
     shuffle=True,
     num_workers=4,
     prev_frame_time_diff=1.0,  # Time difference in seconds
-    transform=None,
+    augment=False,
+    augment_prob=0.5,
 ):
     """
     Create a DataLoader for the preprocessed video dataset.
@@ -294,7 +348,11 @@ def get_dataloader(
         DataLoader instance
     """
     dataset = PreprocessedVideoDataset(
-        preprocessed_dir=preprocessed_dir, annotations_dir=annotations_dir, prev_frame_time_diff=prev_frame_time_diff, transform=transform
+        preprocessed_dir=preprocessed_dir,
+        annotations_dir=annotations_dir,
+        prev_frame_time_diff=prev_frame_time_diff,
+        augment=augment,
+        augment_prob=augment_prob,
     )
 
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, collate_fn=collate_fn)

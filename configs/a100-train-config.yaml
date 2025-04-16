@@ -31,7 +31,7 @@ training:
   # Prodigy works well with large batch sizes on A100
   optimizer: "prodigy"  
   lr: 1.0
-  weight_decay: 0.0005
+  weight_decay: 0.01
   momentum: 0.937
   
   # Loss weights
@@ -54,4 +54,7 @@ training:
   detection:
     conf_thres: 0.25
     iou_thres: 0.45
-    max_det: 100
+    max_det: 1000
+
+  augment: true
+  augment_prob: 0.5

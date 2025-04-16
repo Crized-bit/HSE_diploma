@@ -7,7 +7,9 @@ import numpy as np
 from yolov5_motion.data.dataset import PreprocessedVideoDataset, collate_fn
 
 
-def create_dataset_splits(preprocessed_dir, annotations_dir, splits_file, val_ratio=0.1, seed=42):
+def create_dataset_splits(
+    preprocessed_dir, annotations_dir, splits_file, prev_frame_time_diff=1.0, val_ratio=0.1, seed=42, augment=True, augment_prob=0.5
+):
     """
     Create train, test, and validation dataset splits using the provided splits file.
     Validation set is created by taking a portion of the training set.
@@ -28,14 +30,17 @@ def create_dataset_splits(preprocessed_dir, annotations_dir, splits_file, val_ra
     torch.manual_seed(seed)
 
     # Load the dataset
-    full_dataset = PreprocessedVideoDataset(preprocessed_dir=preprocessed_dir, annotations_dir=annotations_dir)
+    base_dataset = PreprocessedVideoDataset(
+        preprocessed_dir=preprocessed_dir,
+        annotations_dir=annotations_dir,
+        prev_frame_time_diff=prev_frame_time_diff,
+        augment=augment,
+        augment_prob=augment_prob,
+    )
 
     # Load the splits file
     with open(splits_file, "r") as f:
         splits = json.load(f)
-
-    # Get video IDs from the dataset samples
-    video_ids = {sample["video_id"] for sample in full_dataset.samples}
 
     # Create mappings for each split
     test_videos = set([Path(video_path).stem for video_path in splits["test"]])
@@ -45,7 +50,7 @@ def create_dataset_splits(preprocessed_dir, annotations_dir, splits_file, val_ra
     train_indices = []
     test_indices = []
 
-    for idx, sample in enumerate(full_dataset.samples):
+    for idx, sample in enumerate(base_dataset.samples):
         video_id = sample["video_id"]
         if video_id in test_videos:
             test_indices.append(idx)
@@ -61,17 +66,31 @@ def create_dataset_splits(preprocessed_dir, annotations_dir, splits_file, val_ra
     train_indices = train_indices[val_size:]
 
     print(f"Dataset split complete:")
-    print(f"  Total samples: {len(full_dataset)}")
+    print(f"  Total samples: {len(base_dataset)}")
     print(f"  Train samples: {len(train_indices)}")
     print(f"  Val samples: {len(val_indices)}")
     print(f"  Test samples: {len(test_indices)}")
 
-    # Create subset datasets
-    train_dataset = Subset(full_dataset, train_indices)
-    val_dataset = Subset(full_dataset, val_indices)
-    test_dataset = Subset(full_dataset, test_indices)
+    # Create three separate datasets with appropriate augmentation settings
+    train_dataset = PreprocessedVideoDataset(
+        preprocessed_dir=preprocessed_dir, annotations_dir=annotations_dir, augment=True  # Enable augmentation only for training
+    )
 
-    return {"train": train_dataset, "val": val_dataset, "test": test_dataset, "full": full_dataset}
+    val_dataset = PreprocessedVideoDataset(
+        preprocessed_dir=preprocessed_dir, annotations_dir=annotations_dir, augment=False  # No augmentation for validation
+    )
+
+    test_dataset = PreprocessedVideoDataset(
+        preprocessed_dir=preprocessed_dir, annotations_dir=annotations_dir, augment=False  # No augmentation for testing
+    )
+
+    # Use the indices with Subset to get the right samples for each dataset
+    return {
+        "train": Subset(train_dataset, train_indices),
+        "val": Subset(val_dataset, val_indices),
+        "test": Subset(test_dataset, test_indices),
+        "full": base_dataset,
+    }
 
 
 def get_dataloaders(datasets, batch_size=8, num_workers=4):
