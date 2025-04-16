@@ -1,0 +1,28 @@
+# Конфигурация для тестирования YOLOv5 с ControlNet для обнаружения движения
+
+# Пути к данным
+data:
+  preprocessed_dir: "/home/jovyan/p.kudrevatyh/bg_subtraction"
+  annotations_dir: "/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations"
+  splits_file: "/home/jovyan/p.kudrevatyh/yolov5_motion/data/splits.json"
+  output_dir: "./tests/"
+
+# Настройки модели
+model:
+  yolo_cfg: "yolov5m.yaml"
+  img_size: 640
+  num_classes: 1
+
+# Настройки тестирования
+testing:
+  batch_size: 256
+  workers: 8
+  checkpoint: "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/20250416_170430/checkpoints/best_model.pt"
+  visualize: true
+  vis_samples: 10
+  
+  # Настройки детекции
+  detection:
+    conf_thres: 0.25
+    iou_thres: 0.45
+    max_det: 100

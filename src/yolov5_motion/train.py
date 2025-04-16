@@ -1089,7 +1089,7 @@ class Trainer:
                 is_best = False
 
             # Save checkpoint if this is a save epoch
-            if (epoch + 1) % self.args.save_interval == 0 or epoch == self.args.epochs - 1:
+            if (epoch + 1) % self.args.save_interval == 0 or epoch == self.args.epochs - 1 or is_best:
                 self.save_checkpoint(epoch, is_best=is_best)
                 print(f"Saved checkpoint at epoch {epoch+1}")
 
