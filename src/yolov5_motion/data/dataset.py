@@ -200,6 +200,11 @@ class PreprocessedVideoDataset(Dataset):
 
                 frame_idx = entity["blob"]["frame_idx"]
 
+                # Get rid of frames w.o. normal control images
+                if frame_idx <= fps:
+                    # print(f"Skipping frame {frame_idx} for video {video_id}")
+                    continue
+
                 if frame_idx not in frame_annotations:
                     frame_annotations[frame_idx] = []
 
