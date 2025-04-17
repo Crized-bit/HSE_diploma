@@ -20,7 +20,7 @@ model:
 
 # Training parameters optimized for A100
 training:
-  epochs: 100
+  epochs: 200
   # A100 can handle larger batch sizes
   batch_size: 64  
   val_batch_size: 128
@@ -58,3 +58,5 @@ training:
 
   augment: true
   augment_prob: 0.5
+
+  disable_controlnet: false

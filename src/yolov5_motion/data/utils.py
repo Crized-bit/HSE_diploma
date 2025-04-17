@@ -41,23 +41,36 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
         return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
 
     elif mode == "difference":
-        # Calculate difference between current and previous frames
-        diff = cv2.absdiff(prev_gray, cur_gray)
-        # Enhance contrast for better visualization
-        diff = cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX)
-        diff_rgb = cv2.cvtColor(diff, cv2.COLOR_GRAY2RGB)
-        return diff_rgb
-
-    elif mode == "diff_color":
         # Calculate difference in each color channel
-        diff_b = cv2.absdiff(prev_image[:, :, 0], cur_image[:, :, 0])
-        diff_g = cv2.absdiff(prev_image[:, :, 1], cur_image[:, :, 1])
-        diff_r = cv2.absdiff(prev_image[:, :, 2], cur_image[:, :, 2])
-        # Combine channels
-        diff_color = cv2.merge([diff_b, diff_g, diff_r])
-        # Enhance contrast
-        diff_color = cv2.normalize(diff_color, None, 0, 255, cv2.NORM_MINMAX)
-        return diff_color
+        prev_gray = cv2.cvtColor(prev_image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        cur_gray = cv2.cvtColor(cur_image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+
+        # Вычисление разницы со знаком (нормализация для лучшего обучения нейросети)
+        raw_diff = cv2.absdiff(cur_gray, prev_gray)
+
+        # Создание 3-канального изображения
+        result = np.zeros((cur_image.shape[0], cur_image.shape[1], 3), dtype=np.uint8)
+
+        # Канал 0 (Red): текущее изображение в оттенках серого - дает контекст
+        result[:, :, 0] = cur_gray.astype(np.uint8)
+
+        # Канал 1 (Green): разница в изображениях
+        diff = np.clip(raw_diff, 0, 255).astype(np.uint8)
+        result[:, :, 1] = diff
+
+        # Create background model from frame stack
+        bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=len(frames_stack) + 1, varThreshold=16, detectShadows=True)
+
+        # Add all previous frames to the model
+        for frame in frames_stack:
+            # frame_gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            bg_subtractor.apply(frame)
+
+        # Канал 2 (Blue): маска от BG
+        fg_mask = bg_subtractor.apply(cur_image)
+
+        result[:, :, 2] = fg_mask
+        return result
 
     elif mode == "bg_subtraction":
         # Use proper background subtraction with multiple frames

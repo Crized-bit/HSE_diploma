@@ -9,8 +9,8 @@ import sys
 sys.path.append("/home/jovyan/p.kudrevatyh/yolov5")
 
 from models.yolo import Model as YOLOv5Model  # type: ignore
-from utils.torch_utils import model_info  # type: ignore
 from utils.general import check_img_size  # type: ignore
+from utils.torch_utils import model_info  # type: ignore
 
 from yolov5_motion.models.blocks import ControlNetModel
 
@@ -51,8 +51,7 @@ class YOLOv5WithControlNet(nn.Module):
         for param in self.parameters():
             param.requires_grad = False
 
-        # print(model_info(self, verbose=True))
-
+        print(model_info(self, verbose=True))
     def forward(self, x, condition_img=None):
         """
         Forward pass through the combined model
@@ -155,9 +154,9 @@ def create_combined_model(cfg, yolo_weights=None, controlnet_weights=None, img_s
                         state_dict = state_dict.float()
                     if hasattr(state_dict, "state_dict"):
                         state_dict = state_dict.state_dict()
-            else:
-                print(f"Warning: YOLOv5 weights file {yolo_weights} not found")
-                state_dict = None
+    else:
+        print(f"Warning: YOLOv5 weights file {yolo_weights} not found")
+        state_dict = None
 
     # Create model
     model = YOLOv5WithControlNet(cfg=cfg, nc=nc, yolo_weights=state_dict)

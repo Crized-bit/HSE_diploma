@@ -17,12 +17,17 @@ from utils.general import check_img_size  # type: ignore
 class ResConv(nn.Module):
     def __init__(self, c1, c2):
         super().__init__()
+        self.c1 = c1
+        self.c2 = c2
         self.conv = nn.Conv2d(c1, c2, kernel_size=3, padding=1, stride=1)
         self.bn = nn.BatchNorm2d(c2)
         self.act = nn.SiLU()
 
     def forward(self, x):
-        return x + self.act(self.bn(self.conv(x)))
+        if self.c1 == self.c2:
+            return x + self.act(self.bn(self.conv(x)))
+        else:
+            return self.act(self.bn(self.conv(x)))
 
 
 class ControlNetModel(nn.Module):
@@ -37,49 +42,32 @@ class ControlNetModel(nn.Module):
                 Conv(c1=96, c2=192, k=3, s=2, p=1),
                 C3(c1=192, c2=192, n=4),
                 Conv(c1=192, c2=384, k=3, s=2, p=1),
-                C3(c1=384, c2=384, n=6),
-                Conv(c1=384, c2=768, k=3, s=2, p=1),
-                C3(c1=768, c2=768, n=2),
-                SPPF(c1=768, c2=768),
             ]
         )
         nodes = [module.state_dict() for module in yolo_model.model[:10]]
         for my_node, yolo_node in zip(self.backbone, nodes):
-            my_node.load_state_dict(yolo_node)
+            if not isinstance(my_node, nn.Identity):
+                my_node.load_state_dict(yolo_node)
 
         # Convs for ControlNet
         self.convs = nn.ModuleList(
             [
                 nn.Sequential(
                     ResConv(192, 192),
-                    ResConv(192, 192),
-                    ResConv(192, 192),
                 ),
                 nn.Sequential(
                     nn.MaxPool2d(kernel_size=2, stride=2),
                     ResConv(192, 192),
-                    ResConv(192, 192),
-                    ResConv(192, 192),
+                ),
+                nn.Sequential(nn.Identity()),
+                nn.Sequential(nn.Identity()),
+                nn.Sequential(
+                    nn.MaxPool2d(kernel_size=2, stride=2),
+                    ResConv(384, 768),
                 ),
                 nn.Sequential(
-                    ResConv(384, 384),
-                    ResConv(384, 384),
-                    ResConv(384, 384),
-                ),
-                nn.Sequential(
-                    ResConv(384, 384),
-                    ResConv(384, 384),
-                    ResConv(384, 384),
-                ),
-                nn.Sequential(
-                    ResConv(768, 768),
-                    ResConv(768, 768),
-                    ResConv(768, 768),
-                ),
-                nn.Sequential(
-                    ResConv(768, 768),
-                    ResConv(768, 768),
-                    ResConv(768, 768),
+                    nn.MaxPool2d(kernel_size=2, stride=2),
+                    ResConv(384, 768),
                 ),
             ]
         )
@@ -112,28 +100,16 @@ class ControlNetModel(nn.Module):
         conv_19_out = x + self.convs[2](x)
         ####################
 
-        # C3
-        x = x + self.backbone[6](x)
-
         ####### 20 out #####
         conv_20_out = x + self.convs[3](x)
         ####################
 
-        # Conv
-        x = self.backbone[7](x)
-        # C3
-        x = x + self.backbone[8](x)
-
         ####### 22 out #####
-        conv_22_out = x + self.convs[4](x)
+        conv_22_out = self.convs[4](x)
         ####################
 
-        # SPPF
-        x = x + self.backbone[9](x)
-        #####################
-
         ####### 23 out #####
-        conv_23_out = x + self.convs[5](x)
+        conv_23_out = self.convs[5](x)
         ####################
         return (conv_17_out, conv_18_out, conv_19_out, conv_20_out, conv_22_out, conv_23_out)
 

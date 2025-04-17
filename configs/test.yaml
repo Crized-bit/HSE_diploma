@@ -5,24 +5,25 @@ data:
   preprocessed_dir: "/home/jovyan/p.kudrevatyh/bg_subtraction"
   annotations_dir: "/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations"
   splits_file: "/home/jovyan/p.kudrevatyh/yolov5_motion/data/splits.json"
-  output_dir: "./tests/"
 
 # Настройки модели
 model:
-  yolo_cfg: "yolov5m.yaml"
+  yolo_cfg: "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml"
   img_size: 640
   num_classes: 1
 
 # Настройки тестирования
 testing:
-  batch_size: 256
+  batch_size: 128
   workers: 8
-  checkpoint: "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/20250416_170430/checkpoints/best_model.pt"
+  checkpoint: "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/20250417_173102"
   visualize: true
   vis_samples: 10
-  
+  device: "cuda"
   # Настройки детекции
   detection:
     conf_thres: 0.25
     iou_thres: 0.45
     max_det: 100
+  
+  disable_controlnet: false

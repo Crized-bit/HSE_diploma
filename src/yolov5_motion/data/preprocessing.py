@@ -108,16 +108,6 @@ def preprocess_videos(
             frame_indices.add(frame_idx)
             frames_with_annotations[video_id].add(frame_idx)  # Track frames with annotations
 
-            # Calculate frame time in seconds
-            frame_time = frame_idx / fps
-
-            # Calculate previous frame time based on time difference parameter
-            prev_frame_time = max(0, frame_time - prev_frame_time_diff)
-
-            # Calculate previous frame index
-            prev_frame_idx = max(0, int(prev_frame_time * fps))
-            frame_indices.add(prev_frame_idx)
-
         # Add frames to video's list
         frames_by_video[video_id]["frames"].update(frame_indices)
 
@@ -144,7 +134,6 @@ def preprocess_videos(
         video_path = video_item["video_path"]
         frames_to_extract = video_item["frames"]
         fps = video_item["fps"]
-        has_annotations = video_item["has_annotations"]
 
         try:
             print(f"Processing video {video_id} with {len(frames_to_extract)} frames...")
@@ -174,7 +163,7 @@ def preprocess_videos(
                     control_frame_idx = max(0, int(control_frame_time * fps))
                     control_frames.add(control_frame_idx)
 
-                all_control_frames.append((frame_idx, list(control_frames)))
+                all_control_frames.append((frame_idx, sorted(list(control_frames))))
 
             # Get unique indices to read (includes both frames_to_extract and all their control frames)
             all_indices = set(frames_to_extract)

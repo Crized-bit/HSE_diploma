@@ -44,11 +44,16 @@ def create_dataset_splits(
 
     # Create mappings for each split
     test_videos = set([Path(video_path).stem for video_path in splits["test"]])
-    train_videos = set([Path(video_path).stem for video_path in splits["train"]])
+    train_videos = list(set([Path(video_path).stem for video_path in splits["train"]]))
+
+    val_size = int(len(train_videos) * val_ratio)
+    val_videos = train_videos[:val_size]
+    train_videos = train_videos[val_size:]
 
     # Create indices for each split
     train_indices = []
     test_indices = []
+    val_indices = []
 
     for idx, sample in enumerate(base_dataset.samples):
         video_id = sample["video_id"]
@@ -56,14 +61,8 @@ def create_dataset_splits(
             test_indices.append(idx)
         elif video_id in train_videos:
             train_indices.append(idx)
-
-    # Shuffle train indices
-    random.shuffle(train_indices)
-
-    # Split train into train and validation
-    val_size = int(len(train_indices) * val_ratio)
-    val_indices = train_indices[:val_size]
-    train_indices = train_indices[val_size:]
+        elif video_id in val_videos:
+            val_indices.append(idx)
 
     print(f"Dataset split complete:")
     print(f"  Total samples: {len(base_dataset)}")

@@ -165,7 +165,10 @@ def visualize_predictions(model, dataloader, device, config, output_dir):
                 cv2.imwrite(str(vis_dir / f"test_sample_{i}.jpg"), cv2.cvtColor(comparison_with_header, cv2.COLOR_RGB2BGR))
 
                 # Добавляем в панель
-                panel_images.append(comparison_with_header)
+                if not panel_images:
+                    panel_images.append(comparison_with_header)
+                else:
+                    panel_images.append(comparison)
 
             # Создаём итоговую панель со всеми визуализациями
             if panel_images:
@@ -185,7 +188,7 @@ def visualize_predictions(model, dataloader, device, config, output_dir):
 
                 if panel:
                     panel = np.vstack(panel)
-                    cv2.imwrite(str(vis_dir / "test_panel.jpg"), panel)
+                    cv2.imwrite(str(vis_dir / "test_panel.jpg"), cv2.cvtColor(panel, cv2.COLOR_RGB2BGR))
                     print(f"Visualization panel saved to {vis_dir}/test_panel.jpg")
 
         except Exception as e:
@@ -253,7 +256,6 @@ def test(config):
     preprocessed_dir = config["data"]["preprocessed_dir"]
     annotations_dir = config["data"]["annotations_dir"]
     splits_file = config["data"]["splits_file"]
-    output_dir = config["data"]["output_dir"]
 
     yolo_cfg = config["model"]["yolo_cfg"]
     img_size = config["model"]["img_size"]
@@ -268,16 +270,20 @@ def test(config):
     iou_thres = config["testing"]["detection"]["iou_thres"]
     max_det = config["testing"]["detection"]["max_det"]
 
+    device_name = config["testing"]["device"]
+
+    disable_controlnet = config["testing"]["disable_controlnet"]
+
     # Создаём директорию для результатов
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(checkpoint_path) / "test_metrics"
+    output_dir.mkdir(parents=False, exist_ok=False)
 
     # Сохраняем используемую конфигурацию
     with open(output_dir / "test_config.yaml", "w") as f:
         yaml.dump(config, f, default_flow_style=False)
 
     # Выбираем устройство (GPU/CPU)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if (torch.cuda.is_available() and device_name == "cuda") else "cpu")
     print(f"Using device: {device}")
 
     # Создаём датасеты и даталоадеры
@@ -304,7 +310,7 @@ def test(config):
     print("\nLoading model...")
 
     # Путь к чекпоинту
-    checkpoint_path = Path(checkpoint_path)
+    checkpoint_path = Path(checkpoint_path) / "checkpoints/best_model.pt"
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
 
@@ -341,6 +347,12 @@ def test(config):
                     raise ValueError("Could not load model weights from checkpoint")
 
     model = model.to(device)
+
+    if disable_controlnet:
+        print("Disabling ControlNet...")
+        model.use_controlnet = False
+        
+    # print(model_info(model, verbose=True))
     model.eval()  # Устанавливаем режим оценки
 
     # Тестирование модели

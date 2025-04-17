@@ -171,6 +171,10 @@ class Trainer:
             nc=args.num_classes,
         )
         self.model = self.model.to(self.device)
+        
+        if args.disable_controlnet:
+            print("Disabling ControlNet...")
+            self.model.use_controlnet = False
 
         # Initialize loss function if YOLOv5 loss is available
         try:
@@ -1230,6 +1234,9 @@ def main():
 
     # Resume
     args.resume = config_dict["training"]["resume"]
+
+    # Use controlnet at all
+    args.disable_controlnet = config_dict["training"]["disable_controlnet"]
 
     # Save the resolved configuration
     os.makedirs(args.output_dir, exist_ok=True)
