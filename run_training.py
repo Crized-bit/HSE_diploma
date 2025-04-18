@@ -6,7 +6,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Run YOLOv5 ControlNet training")
-    parser.add_argument("--config", type=str, default="/home/jovyan/p.kudrevatyh/yolov5_motion/configs/a100-train-config.yaml", help="Path to configuration file (creates example if not provided)")
+    parser.add_argument("--config", type=str, default="/home/jovyan/p.kudrevatyh/yolov5_motion/configs/a100-train-config.yaml", help="Path to configuration file")
 
     args, unknown_args = parser.parse_known_args()
 

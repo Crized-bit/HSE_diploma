@@ -12,6 +12,7 @@ MODEL_NAMES = [
     "fixed_bg_sub_200",
     "head_only",
     "base_model_w_controlnet",
+    "finetune_head",
     # Добавьте больше моделей при необходимости
 ]
 

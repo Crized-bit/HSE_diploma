@@ -428,7 +428,7 @@ class Trainer:
             # Backward pass (no scaler needed for bf16)
             loss.backward()
 
-            torch.nn.utils.clip_grad_norm_(self.model.controlnet.parameters(), max_norm=10.0)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
             self.optimizer.step()
 
             # Update metrics

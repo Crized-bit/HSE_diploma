@@ -191,16 +191,15 @@ class PreprocessedVideoDataset(Dataset):
                 # Skip reflections
                 if "labels" in entity and isinstance(entity["labels"], dict):
                     if (
-                        entity["labels"].get("reflection") == 1
-                        or entity["labels"].get("severly_occluded_person") == 1
-                        or entity["labels"].get("crowd") == 1
+                        entity["labels"].get("crowd") == 1
+                        or entity["labels"].get("fully_occluded") == 1
                     ):
                         continue  # Skip this annotation
 
                 frame_idx = entity["blob"]["frame_idx"]
 
                 # Get rid of frames w.o. normal control images
-                if frame_idx <= fps:
+                if frame_idx <= fps * 5:
                     # print(f"Skipping frame {frame_idx} for video {video_id}")
                     continue
 

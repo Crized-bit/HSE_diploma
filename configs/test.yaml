@@ -16,7 +16,7 @@ model:
 testing:
   batch_size: 128
   workers: 8
-  checkpoint: "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/base_model_w_controlnet"
+  checkpoint: "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/finetune_head"
   epoch_num: 0
   visualize: true
   vis_samples: 10
@@ -27,4 +27,4 @@ testing:
     iou_thres: 0.45
     max_det: 100
   
-  disable_controlnet: false
+  disable_controlnet: true
