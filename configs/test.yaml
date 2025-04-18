@@ -10,13 +10,14 @@ data:
 model:
   yolo_cfg: "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml"
   img_size: 640
-  num_classes: 1
+  num_classes: 80
 
 # Настройки тестирования
 testing:
   batch_size: 128
   workers: 8
-  checkpoint: "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/20250417_173102"
+  checkpoint: "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/base_model_w_controlnet"
+  epoch_num: 0
   visualize: true
   vis_samples: 10
   device: "cuda"

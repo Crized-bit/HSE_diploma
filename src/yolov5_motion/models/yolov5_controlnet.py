@@ -1,4 +1,5 @@
 from matplotlib import pyplot as plt
+from pathlib import Path
 import torch
 import torch.nn as nn
 import os
@@ -303,17 +304,28 @@ if __name__ == "__main__":
     weights = "/home/jovyan/p.kudrevatyh/yolov5m.pt"
     model = create_combined_model(
         yolo_weights=weights,  # Load pretrained YOLOv5 weights
-        controlnet_weights=None,  # Initialize ControlNet with zeros
+        controlnet_weights=None,  # Initialize ControlNet from model encoder
         cfg="/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml",  # Use YOLOv5m configuration
         img_size=640,
-        nc=1,
+        nc=80,
     )
 
     # print(model)
     # Example of saving and loading just the ControlNet portion
     # After training
-    model.save_controlnet("controlnet_weights.pt")
+    checkpoint = {
+            "epoch": 0,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": None,
+            "global_step": None,
+            "best_val_loss": None,
+        }
 
+        # Save regular checkpoint
+    checkpoint_path = Path("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/base_model/checkpoints") / f"checkpoint_best.pt"
+    torch.save(checkpoint, checkpoint_path)
+
+    exit(0)
     # Later, to load a pretrained ControlNet
     new_model = create_combined_model(
         cfg="/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml", yolo_weights=weights, controlnet_weights="controlnet_weights.pt", nc=1

@@ -45,11 +45,11 @@ class PreprocessedVideoDataset(Dataset):
                     # Spatial augmentations that apply to both image and control
                     A.HorizontalFlip(p=augment_prob),
                     A.RandomResizedCrop(size=(640, 640), scale=(0.8, 1.0), p=augment_prob),
-                    A.Rotate(limit=15, p=augment_prob),
+                    A.Rotate(limit=15, p=augment_prob, fill=(114, 114, 114)),
                     # Color augmentations only for the input image
                     A.OneOf(
                         [
-                            A.RandomBrightnessContrast(p=1.0),
+                            A.RandomBrightnessContrast(p=1.0, ensure_safe_range=True),
                             A.HueSaturationValue(p=1.0),
                             A.RGBShift(p=1.0),
                         ],
@@ -60,7 +60,6 @@ class PreprocessedVideoDataset(Dataset):
                         [
                             A.GaussNoise(p=1.0),
                             A.GaussianBlur(p=1.0),
-                            A.MotionBlur(p=1.0),
                         ],
                         p=augment_prob * 0.5,
                     ),  # Lower probability for these

@@ -25,10 +25,9 @@ else:
 
 # Import YOLOv5 modules for loss computation and bounding box processing
 try:
-    from utils.loss import ComputeLoss  # type: ignore
     from utils.general import non_max_suppression, scale_boxes  # type: ignore
 
-    print("Successfully imported YOLOv5 loss computation modules")
+    print("Successfully imported YOLOv5 computation modules")
 except ImportError as e:
     print(f"Warning: Could not import YOLOv5 modules: {e}")
     # print("Will use placeholder loss function instead")
@@ -37,7 +36,7 @@ except ImportError as e:
 from yolov5_motion.models.yolov5_controlnet import create_combined_model, GradientTracker
 from yolov5_motion.data.dataset_splits import create_dataset_splits, get_dataloaders
 from yolov5_motion.utils.metrics import calculate_precision_recall, calculate_map
-
+from yolov5_motion.utils.loss import ComputeLoss
 # Try to import Prodigy optimizer if available
 try:
     from prodigyopt import Prodigy
@@ -491,9 +490,9 @@ class Trainer:
         all_true_boxes = []
 
         # Initialize metrics collector
-        precision_by_class = defaultdict(list)
-        recall_by_class = defaultdict(list)
-        f1_by_class = defaultdict(list)
+        precisions = []
+        recalls = []
+        f1s = []
 
         with torch.no_grad():
             pbar = tqdm(self.dataloaders["val"], desc=f"Validating epoch {epoch+1}")
@@ -521,7 +520,8 @@ class Trainer:
 
                         # Convert to list format expected by metrics functions
                         for *xyxy, conf, cls_id in det:
-                            pred_boxes.append([xyxy[0].item(), xyxy[1].item(), xyxy[2].item(), xyxy[3].item(), conf.item(), cls_id.item()])
+                            if cls_id == 0:
+                                pred_boxes.append([xyxy[0].item(), xyxy[1].item(), xyxy[2].item(), xyxy[3].item(), conf.item(), cls_id.item()])
 
                     # Process ground truth
                     true_boxes = []
@@ -545,13 +545,9 @@ class Trainer:
                             pred_boxes, true_boxes, iou_threshold=0.5, conf_threshold=self.args.conf_thres
                         )
 
-                        # Store by class (for multi-class detection)
-                        class_ids = set([box[5] for box in pred_boxes if len(box) > 5] + [box[4] for box in true_boxes if len(box) > 4])
-
-                        for cls_id in class_ids:
-                            precision_by_class[cls_id].append(precision)
-                            recall_by_class[cls_id].append(recall)
-                            f1_by_class[cls_id].append(f1)
+                        precisions.append(precision)
+                        recalls.append(recall)
+                        f1s.append(f1)
 
                     # Store for mAP calculation
                     all_pred_boxes.append(pred_boxes)
@@ -578,12 +574,12 @@ class Trainer:
         map50, map = calculate_map(all_pred_boxes, all_true_boxes)
 
         # Calculate average precision and recall across all images
-        avg_precision = np.mean([np.mean(precisions) for cls_id, precisions in precision_by_class.items()]) if precision_by_class else 0
-        avg_recall = np.mean([np.mean(recalls) for cls_id, recalls in recall_by_class.items()]) if recall_by_class else 0
-        avg_f1 = np.mean([np.mean(f1s) for cls_id, f1s in f1_by_class.items()]) if f1_by_class else 0
+        precision = np.mean(precisions)
+        recall = np.mean(recalls)
+        f1 = np.mean(f1s)
 
         # Add detection metrics to validation metrics
-        avg_val_metrics.update({"precision": avg_precision, "recall": avg_recall, "f1": avg_f1, "mAP@0.5": map50, "mAP@0.5:0.95": map})
+        avg_val_metrics.update({"precision": precision, "recall": recall, "f1": f1, "mAP@0.5": map50, "mAP@0.5:0.95": map})
 
         # Log validation metrics
         self.writer.add_scalar("val/epoch_loss", avg_val_loss, epoch)
@@ -604,9 +600,9 @@ class Trainer:
             self.val_map50 = []
             self.val_map = []
 
-        self.val_precision.append(avg_precision)
-        self.val_recall.append(avg_recall)
-        self.val_f1.append(avg_f1)
+        self.val_precision.append(precision)
+        self.val_recall.append(recall)
+        self.val_f1.append(f1)
         self.val_map50.append(map50)
         self.val_map.append(map)
 
@@ -1131,52 +1127,19 @@ class Trainer:
         self.writer.close()
 
 
-def main():
+def main(config:str):
     """
     Main training function that can be called directly or imported.
     Handles configuration loading and training initialization.
     """
-    import argparse
     import yaml
     import os
     import torch
     import numpy as np
-    from pathlib import Path
-
-    # Parse command line arguments - define this inline to avoid needing parse_args()
-    parser = argparse.ArgumentParser(description="Train YOLOv5 with ControlNet for Motion")
-
-    # Only require config path for YAML configuration
-    parser.add_argument("--config", type=str, required=True, help="Path to YAML configuration file")
-
-    # Allow command-line overrides for key parameters
-    parser.add_argument("--output_dir", type=str, help="Override output directory from config")
-    parser.add_argument("--epochs", type=int, help="Override number of epochs from config")
-    parser.add_argument("--batch_size", type=int, help="Override batch size from config")
-    parser.add_argument("--lr", type=float, help="Override learning rate from config")
-    parser.add_argument("--resume", type=str, help="Override resume checkpoint path from config")
-
-    cmd_args = parser.parse_args()
 
     # Load configuration from YAML file - inline implementation
-    with open(cmd_args.config, "r") as f:
+    with open(config, "r") as f:
         config_dict = yaml.safe_load(f)
-
-    # Apply command-line overrides if provided
-    if cmd_args.output_dir:
-        config_dict["data"]["output_dir"] = cmd_args.output_dir
-
-    if cmd_args.epochs:
-        config_dict["training"]["epochs"] = cmd_args.epochs
-
-    if cmd_args.batch_size:
-        config_dict["training"]["batch_size"] = cmd_args.batch_size
-
-    if cmd_args.lr:
-        config_dict["training"]["lr"] = cmd_args.lr
-
-    if cmd_args.resume:
-        config_dict["training"]["resume"] = cmd_args.resume
 
     # Create a flat namespace for backwards compatibility - inline implementation
     args = argparse.Namespace()

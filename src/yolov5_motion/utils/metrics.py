@@ -112,11 +112,11 @@ def calculate_box_iou(box1, box2):
 
 def calculate_map(pred_boxes_by_image, true_boxes_by_image, iou_thresholds=[0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]):
     """
-    Calculate mAP at different IoU thresholds.
+    Calculate mAP at different IoU thresholds using proper AP calculation.
     
     Args:
-        pred_boxes_by_image: List of lists containing predicted boxes for each image
-        true_boxes_by_image: List of lists containing ground truth boxes for each image
+        pred_boxes_by_image: List containing predicted boxes for each image
+        true_boxes_by_image: List containing ground truth boxes for each image
         iou_thresholds: List of IoU thresholds to calculate mAP
         
     Returns:
@@ -130,20 +130,104 @@ def calculate_map(pred_boxes_by_image, true_boxes_by_image, iou_thresholds=[0.5,
     aps = []
     
     for threshold in iou_thresholds:
+        # For each threshold, collect all predictions across all images
+        all_predictions = []
+        total_gt = 0
+        
+        # Process and combine data from all images
+        for img_idx, (pred_boxes, true_boxes) in enumerate(zip(pred_boxes_by_image, true_boxes_by_image)):
+            # Count total ground truths
+            total_gt += len(true_boxes)
+            
+            # Filter predictions by confidence threshold
+            filtered_preds = [box for box in pred_boxes if box[4] >= 0.25]  # Using default 0.25 threshold
+            
+            # Skip if no predictions
+            if not filtered_preds:
+                continue
+                
+            # For each prediction, calculate IoU with all ground truths in the same image
+            for pred in filtered_preds:
+                pred_info = {
+                    'confidence': pred[4],
+                    'matched': False,
+                    'img_idx': img_idx,
+                    'iou': 0
+                }
+                
+                # Skip if no ground truths for this image
+                if not true_boxes:
+                    all_predictions.append(pred_info)
+                    continue
+                
+                # Find best matching ground truth
+                best_iou = 0
+                best_gt_idx = -1
+                
+                for gt_idx, gt in enumerate(true_boxes):
+                    # Skip if class doesn't match (for multi-class detection)
+                    if len(pred) > 5 and len(gt) > 4 and pred[5] != gt[4]:
+                        continue
+                        
+                    iou = calculate_box_iou(pred[:4], gt[:4])
+                    if iou > best_iou:
+                        best_iou = iou
+                        best_gt_idx = gt_idx
+                
+                pred_info['iou'] = best_iou
+                
+                # Check if it's a match at this threshold
+                if best_gt_idx >= 0 and best_iou >= threshold:
+                    pred_info['matched'] = True
+                    pred_info['gt_idx'] = best_gt_idx
+                
+                all_predictions.append(pred_info)
+        
+        # Sort all predictions by confidence (highest first)
+        all_predictions.sort(key=lambda x: x['confidence'], reverse=True)
+        
+        # Initialize counters for precision-recall calculation
+        true_positives = 0
+        false_positives = 0
+        
+        # Track which ground truths have been matched to avoid double counting
+        gt_matched = {}  # (img_idx, gt_idx) -> bool
+        
+        # Calculate precision and recall at each detection
         precisions = []
         recalls = []
         
-        for pred_boxes, true_boxes in zip(pred_boxes_by_image, true_boxes_by_image):
-            precision, recall, _ = calculate_precision_recall(pred_boxes, true_boxes, iou_threshold=threshold)
+        for pred in all_predictions:
+            # If it's a match and the GT hasn't been matched yet
+            if pred['matched'] and (pred['img_idx'], pred['gt_idx']) not in gt_matched:
+                true_positives += 1
+                gt_matched[(pred['img_idx'], pred['gt_idx'])] = True
+            else:
+                false_positives += 1
+            
+            # Calculate precision and recall at this point
+            precision = true_positives / (true_positives + false_positives)
+            recall = true_positives / max(total_gt, 1)
+            
             precisions.append(precision)
             recalls.append(recall)
         
-        # Average precision and recall across images
-        avg_precision = np.mean(precisions) if precisions else 0
-        avg_recall = np.mean(recalls) if recalls else 0
+        # Calculate AP using precision-recall points
+        if not precisions:
+            ap = 0
+        else:
+            # Use all points for AP calculation
+            mrec = np.concatenate(([0.0], recalls, [1.0]))
+            mpre = np.concatenate(([0.0], precisions, [0.0]))
+            
+            # Compute the precision envelope (interpolation)
+            for i in range(mpre.size - 1, 0, -1):
+                mpre[i - 1] = np.maximum(mpre[i - 1], mpre[i])
+                
+            # Calculate area under PR curve
+            indices = np.where(mrec[1:] != mrec[:-1])[0]
+            ap = np.sum((mrec[indices + 1] - mrec[indices]) * mpre[indices + 1])
         
-        # Calculate AP as area under PR curve (simplified as precision * recall)
-        ap = avg_precision * avg_recall
         aps.append(ap)
     
     # Calculate mAP

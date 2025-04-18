@@ -8,7 +8,6 @@ import cv2
 from tqdm import tqdm
 from pathlib import Path
 import matplotlib.pyplot as plt
-from collections import defaultdict
 import yaml
 
 # Добавляем пути для импорта YOLOv5 и наших модулей
@@ -274,6 +273,7 @@ def test(config):
 
     disable_controlnet = config["testing"]["disable_controlnet"]
 
+    epoch_num = config["testing"]["epoch_num"]
     # Создаём директорию для результатов
     output_dir = Path(checkpoint_path) / "test_metrics"
     output_dir.mkdir(parents=False, exist_ok=False)
@@ -310,7 +310,10 @@ def test(config):
     print("\nLoading model...")
 
     # Путь к чекпоинту
-    checkpoint_path = Path(checkpoint_path) / "checkpoints/best_model.pt"
+    if not epoch_num:
+        checkpoint_path = Path(checkpoint_path) / "checkpoints/best_model.pt"
+    else:
+        checkpoint_path = Path(checkpoint_path) / f"checkpoints/checkpoint_epoch_{epoch_num}.pt"
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
 
@@ -363,9 +366,9 @@ def test(config):
     all_true_boxes = []
 
     # Инициализируем сборщик метрик
-    precision_by_class = defaultdict(list)
-    recall_by_class = defaultdict(list)
-    f1_by_class = defaultdict(list)
+    precisions = []
+    recalls = []
+    f1s = []
 
     with torch.no_grad():
         pbar = tqdm(test_dataloader, desc="Testing")
@@ -396,7 +399,9 @@ def test(config):
 
                     # Конвертируем в формат, ожидаемый функциями метрик
                     for *xyxy, conf, cls_id in det:
-                        pred_boxes.append([xyxy[0].item(), xyxy[1].item(), xyxy[2].item(), xyxy[3].item(), conf.item(), cls_id.item()])
+                        # We need to pred only people
+                        if cls_id == 0:
+                            pred_boxes.append([xyxy[0].item(), xyxy[1].item(), xyxy[2].item(), xyxy[3].item(), conf.item(), cls_id.item()])
 
                 # Обрабатываем ground truth
                 true_boxes = []
@@ -418,13 +423,9 @@ def test(config):
                 if len(true_boxes) > 0 or len(pred_boxes) > 0:
                     precision, recall, f1 = calculate_precision_recall(pred_boxes, true_boxes, iou_threshold=0.5, conf_threshold=conf_thres)
 
-                    # Сохраняем по классам (для многоклассовой детекции)
-                    class_ids = set([box[5] for box in pred_boxes if len(box) > 5] + [box[4] for box in true_boxes if len(box) > 4])
-
-                    for cls_id in class_ids:
-                        precision_by_class[cls_id].append(precision)
-                        recall_by_class[cls_id].append(recall)
-                        f1_by_class[cls_id].append(f1)
+                    precisions.append(precision)
+                    recalls.append(recall)
+                    f1s.append(f1)
 
                 # Сохраняем для расчёта mAP
                 all_pred_boxes.append(pred_boxes)
@@ -434,9 +435,9 @@ def test(config):
     map50, map = calculate_map(all_pred_boxes, all_true_boxes)
 
     # Рассчитываем среднюю precision и recall по всем изображениям
-    avg_precision = np.mean([np.mean(precisions) for cls_id, precisions in precision_by_class.items()]) if precision_by_class else 0
-    avg_recall = np.mean([np.mean(recalls) for cls_id, recalls in recall_by_class.items()]) if recall_by_class else 0
-    avg_f1 = np.mean([np.mean(f1s) for cls_id, f1s in f1_by_class.items()]) if f1_by_class else 0
+    avg_precision = np.mean(precisions)
+    avg_recall = np.mean(recalls)
+    avg_f1 = np.mean(f1s)
 
     # Формируем итоговые метрики
     test_metrics = {"precision": avg_precision, "recall": avg_recall, "f1": avg_f1, "mAP@0.5": map50, "mAP@0.5:0.95": map}

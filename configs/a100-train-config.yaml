@@ -13,9 +13,9 @@ model:
   controlnet_weights: null
   yolo_cfg: "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml"
   img_size: 640
-  num_classes: 1
+  num_classes: 80
   train_all: false
-  train_controlnet: true
+  train_controlnet: false
   train_head: true
 
 # Training parameters optimized for A100
@@ -59,4 +59,4 @@ training:
   augment: true
   augment_prob: 0.5
 
-  disable_controlnet: false
+  disable_controlnet: true
