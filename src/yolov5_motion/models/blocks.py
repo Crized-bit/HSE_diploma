@@ -71,8 +71,11 @@ class ControlNetModel(nn.Module):
                 ),
             ]
         )
-
-    def forward(self, x):
+        
+        self.start_conv = ResConv(3, 3)
+    def forward(self, intial_img, x):
+        x = self.start_conv(x)
+        x = x + intial_img
         # Convs
         x = self.backbone[0](x)
         x = self.backbone[1](x)

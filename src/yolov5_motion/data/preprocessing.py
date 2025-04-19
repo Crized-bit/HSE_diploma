@@ -18,6 +18,7 @@ def preprocess_videos(
     num_workers=8,
     prev_frame_time_diff=1.0,
     control_mode: str = "flow",
+    control_stack_length: int = 15,
 ):
     """
     Preprocess videos by extracting frames and computing control images, saving them as individual images.
@@ -129,7 +130,7 @@ def preprocess_videos(
         )
 
     # Define a function to process an entire video
-    def process_video(video_item, n_control_frames=15):
+    def process_video(video_item, control_stack_length=15):
         video_id = video_item["video_id"]
         video_path = video_item["video_path"]
         frames_to_extract = video_item["frames"]
@@ -137,7 +138,7 @@ def preprocess_videos(
 
         try:
             print(f"Processing video {video_id} with {len(frames_to_extract)} frames...")
-            print(f"Using {n_control_frames} control frames for each target frame")
+            print(f"Using {control_stack_length} control frames for each target frame")
 
             # Create output directories for this video
             video_output_dir = frames_path / video_id
@@ -155,7 +156,7 @@ def preprocess_videos(
                 frame_time = frame_idx / fps
                 control_frames = set()
 
-                for i in range(n_control_frames):
+                for i in range(control_stack_length):
                     # Calculate time for each control frame going back in time
                     # The total time span will be prev_frame_time_diff * n_control_frames
                     control_time_diff = prev_frame_time_diff * (i + 1)
@@ -234,25 +235,24 @@ def preprocess_videos(
                 preprocessed_control_frames = []
                 for i, control_frame_idx in enumerate(control_frames_indices):
                     if control_frame_idx not in frames_dict:
-                        continue
+                        raise ValueError(f"Control frame {control_frame_idx} not found in frames_dict")
+                        # continue
 
                     control_frame = frames_dict[control_frame_idx]
-
                     # Resize control frame
                     resized_control = cv2.resize(control_frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-
-                    # Create control image with padding
-                    target_control = np.ones((target_h, target_w, 3), dtype=np.uint8) * np.array(pad_color, dtype=np.uint8)
-                    target_control[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = resized_control
-
-                    preprocessed_control_frames.append(target_control)
+                    preprocessed_control_frames.append(resized_control)
 
                 # Generate and save control image
-                control_image = create_control_image(preprocessed_control_frames, target_image, control_mode)
+                control_image = create_control_image(preprocessed_control_frames, resized, control_mode)
 
+                # Create control image with padding
+                target_control = np.ones((target_h, target_w, 3), dtype=np.uint8) * np.array(pad_color, dtype=np.uint8)
+                target_control[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = control_image
+                
                 # Save with index to differentiate between multiple control frames
                 control_output_path = control_output_dir / f"control_{frame_idx:06d}.jpg"
-                cv2.imwrite(str(control_output_path), cv2.cvtColor(control_image, cv2.COLOR_RGB2BGR))
+                cv2.imwrite(str(control_output_path), cv2.cvtColor(target_control, cv2.COLOR_RGB2BGR))
 
             # Clear memory
             del frames_dict
@@ -274,7 +274,7 @@ def preprocess_videos(
     results = []
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
-        future_to_video = {executor.submit(process_video, video_item): video_item["video_id"] for video_item in videos_to_process}
+        future_to_video = {executor.submit(process_video, video_item, control_stack_length): video_item["video_id"] for video_item in videos_to_process}
 
         for future in tqdm(concurrent.futures.as_completed(future_to_video), total=len(videos_to_process), desc="Processing videos"):
             video_id = future_to_video[future]

@@ -60,7 +60,7 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
         result[:, :, 1] = diff
 
         # Create background model from frame stack
-        bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=len(frames_stack) + 1, varThreshold=16, detectShadows=True)
+        bg_subtractor = cv2.createBackgroundSubtractorKNN(detectShadows=True)
 
         # Add all previous frames to the model
         for frame in frames_stack:
@@ -70,7 +70,7 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
         # Канал 2 (Blue): маска от BG
         fg_mask = bg_subtractor.apply(cur_image)
 
-        fg_mask = cv2.normalize(fg_mask, None, 0, 255, cv2.NORM_MINMAX)
+        # fg_mask = cv2.normalize(fg_mask, None, 0, 255, cv2.NORM_MINMAX)
 
         result[:, :, 2] = fg_mask
         return result
@@ -79,7 +79,7 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
         # Use proper background subtraction with multiple frames
 
         # Create background model from frame stack
-        bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=len(frames_stack) + 1, varThreshold=16, detectShadows=True)
+        bg_subtractor = cv2.createBackgroundSubtractorKNN(detectShadows=True, history=len(frames_stack) + 1)
 
         # Add all previous frames to the model
         for frame in frames_stack:
@@ -92,8 +92,6 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
         # Create control image from foreground mask
         result = cv2.cvtColor(fg_mask, cv2.COLOR_GRAY2RGB)
 
-        # Normalize the result
-        result = cv2.normalize(result, None, 0, 255, cv2.NORM_MINMAX)
         return result
 
     else:

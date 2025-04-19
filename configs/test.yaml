@@ -5,7 +5,8 @@ data:
   preprocessed_dir: "/home/jovyan/p.kudrevatyh/bg_subtraction"
   annotations_dir: "/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations"
   splits_file: "/home/jovyan/p.kudrevatyh/yolov5_motion/data/splits.json"
-
+  control_stack_length: 10
+  val_ratio: 0.2
 # Настройки модели
 model:
   yolo_cfg: "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml"
@@ -16,8 +17,8 @@ model:
 testing:
   batch_size: 128
   workers: 8
-  checkpoint: "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/finetune_head"
-  epoch_num: 0
+  checkpoint: "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/bg_sub_new"
+  epoch_num: 19
   visualize: true
   vis_samples: 10
   device: "cuda"
@@ -27,4 +28,4 @@ testing:
     iou_thres: 0.45
     max_det: 100
   
-  disable_controlnet: true
+  disable_controlnet: false

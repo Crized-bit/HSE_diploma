@@ -219,6 +219,7 @@ class Trainer:
             val_ratio=args.val_ratio,
             augment=args.augment,  # Enable augmentation
             augment_prob=args.augment_prob,
+            control_stack_length=args.control_stack_length,
         )
 
         self.dataloaders = get_dataloaders(datasets=self.datasets, batch_size=args.batch_size, num_workers=args.workers)
@@ -376,7 +377,6 @@ class Trainer:
             for ann in annotations:
                 # Extract bounding box
                 bbox = torch.tensor(ann["bbox"], dtype=torch.float32)
-                is_crowd = ann["is_crowd"]
                 # Normalize coordinates to [0,1]
                 normalized_bbox = torch.zeros_like(bbox)
                 normalized_bbox[0] = bbox[0] / img_size  # normalize center_x
@@ -388,7 +388,7 @@ class Trainer:
                 class_idx = 0
 
                 # Create target row [batch_idx, class_idx, x, y, w, h, ignore_flag]
-                target_row = torch.tensor([batch_idx, class_idx, *normalized_bbox, is_crowd], dtype=torch.float32)
+                target_row = torch.tensor([batch_idx, class_idx, *normalized_bbox], dtype=torch.float32)
                 all_targets.append(target_row)
 
         # Combine all target rows
@@ -400,7 +400,9 @@ class Trainer:
 
     def train_epoch(self, epoch):
         """Train the model for one epoch"""
-        self.model.train()
+        self.model.yolo.eval()
+        self.model.controlnet.train()
+        # in case we somehow touch batchnorms
         epoch_loss = 0
         epoch_metrics = {"box_loss": 0, "obj_loss": 0, "cls_loss": 0}
 
@@ -418,17 +420,17 @@ class Trainer:
             # Forward pass with selected precision
             if self.precision == "fp16" or self.precision == "bf16":
                 with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    predictions = self.model(current_frames, control_images)
+                    _, predictions = self.model(current_frames, control_images)
                     loss, metrics = self.compute_loss(predictions, targets)
             else:
                 # Regular FP32 forward pass
-                predictions = self.model(current_frames, control_images)
+                _, predictions = self.model(current_frames, control_images)
                 loss, metrics = self.compute_loss(predictions, targets)
 
             # Backward pass (no scaler needed for bf16)
             loss.backward()
 
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
+            torch.nn.utils.clip_grad_norm_(self.model.controlnet.parameters(), max_norm=10.0)
             self.optimizer.step()
 
             # Update metrics
@@ -1149,6 +1151,7 @@ def main(config:str):
     args.annotations_dir = config_dict["data"]["annotations_dir"]
     args.splits_file = config_dict["data"]["splits_file"]
     args.output_dir = config_dict["data"]["output_dir"]
+    args.control_stack_length = config_dict["data"]["control_stack_length"]
 
     # Model configuration
     args.yolo_weights = config_dict["model"]["yolo_weights"]

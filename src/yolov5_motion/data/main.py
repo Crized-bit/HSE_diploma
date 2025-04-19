@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--prev_frame_time_diff", type=float, default=1.0, help="Time difference in seconds to get the previous frame")
     parser.add_argument("--resize_to", type=int, nargs=2, default=[640, 640], help="Target size (width, height) for resizing frames")
     parser.add_argument("--control_mode", type=str, default="bg_subtraction", help="Control mode for preprocessing")
+    parser.add_argument("--control_stack_length", type=int, default=10, help="Number of frames to stack for ControlNet")
 
     # Dataset and dataloader options
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size for dataloaders")
@@ -57,6 +58,7 @@ def main():
             num_workers=args.num_workers,
             prev_frame_time_diff=args.prev_frame_time_diff,
             control_mode=args.control_mode,
+            control_stack_length=args.control_stack_length,
         )
         print(f"Preprocessing completed in {time.time() - start_time:.2f} seconds")
 
@@ -68,6 +70,7 @@ def main():
         annotations_dir=args.annotations_dir,
         splits_file=args.splits_file,
         val_ratio=args.val_ratio,
+        control_stack_length=args.control_stack_length,
     )
     print(f"Dataset splits created in {time.time() - start_time:.2f} seconds")
 

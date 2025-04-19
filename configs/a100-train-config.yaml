@@ -6,6 +6,7 @@ data:
   annotations_dir: "/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations"
   splits_file: "/home/jovyan/p.kudrevatyh/yolov5_motion/data/splits.json"
   output_dir: "./a100_training_outputs"
+  control_stack_length: 10
 
 # Model configuration
 model:
@@ -16,7 +17,7 @@ model:
   num_classes: 80
   train_all: false
   train_controlnet: true
-  train_head: true
+  train_head: false
 
 # Training parameters optimized for A100
 training:
@@ -26,7 +27,7 @@ training:
   val_batch_size: 128
   # More workers for faster data loading
   workers: 12     
-  val_ratio: 0.1
+  val_ratio: 0.2
   
   # Prodigy works well with large batch sizes on A100
   optimizer: "prodigy"  

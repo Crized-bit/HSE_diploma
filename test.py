@@ -255,6 +255,8 @@ def test(config):
     preprocessed_dir = config["data"]["preprocessed_dir"]
     annotations_dir = config["data"]["annotations_dir"]
     splits_file = config["data"]["splits_file"]
+    control_stack_length = config["data"]["control_stack_length"]
+    val_ratio = config["data"]["val_ratio"]
 
     yolo_cfg = config["model"]["yolo_cfg"]
     img_size = config["model"]["img_size"]
@@ -274,8 +276,9 @@ def test(config):
     disable_controlnet = config["testing"]["disable_controlnet"]
 
     epoch_num = config["testing"]["epoch_num"]
+
     # Создаём директорию для результатов
-    output_dir = Path(checkpoint_path) / "test_metrics"
+    output_dir = Path(checkpoint_path) / f"test_metrics{epoch_num if epoch_num != 0 else ''}"
     output_dir.mkdir(parents=False, exist_ok=False)
 
     # Сохраняем используемую конфигурацию
@@ -292,8 +295,9 @@ def test(config):
         preprocessed_dir=preprocessed_dir,
         annotations_dir=annotations_dir,
         splits_file=splits_file,
-        val_ratio=0.1,
+        val_ratio=val_ratio,
         augment=False,  # Без аугментации для тестирования
+        control_stack_length=control_stack_length,
     )
 
     # Создаём даталоадер только для тестового набора

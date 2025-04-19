@@ -67,7 +67,7 @@ class YOLOv5WithControlNet(nn.Module):
 
         # Forward pass through ControlNet
         if self.use_controlnet and condition_img is not None:
-            control_outputs = self.controlnet(condition_img)
+            control_outputs = self.controlnet(x, condition_img)
 
         # Store intermediate feature maps that will be modified by ControlNet
         control_indices = [17, 18, 19, 20, 22, 23]
@@ -322,7 +322,7 @@ if __name__ == "__main__":
         }
 
         # Save regular checkpoint
-    checkpoint_path = Path("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/base_model/checkpoints") / f"checkpoint_best.pt"
+    checkpoint_path = Path("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/base_model/checkpoints") / f"best_model.pt"
     torch.save(checkpoint, checkpoint_path)
 
     exit(0)

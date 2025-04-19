@@ -21,6 +21,7 @@ class PreprocessedVideoDataset(Dataset):
         prev_frame_time_diff: float = None,  # Time difference in seconds
         augment: bool = False,
         augment_prob: float = 0.5,
+        control_stack_length: int = 15,
     ):
         """
         Initialize the dataset.
@@ -37,7 +38,7 @@ class PreprocessedVideoDataset(Dataset):
         self.annotations_dir = Path(annotations_dir)
         self.prev_frame_time_diff = prev_frame_time_diff
         self.augment = augment
-
+        self.control_stack_length = control_stack_length
         # Setup augmentations if enabled
         if self.augment:
             self.aug_transform = A.Compose(
@@ -45,7 +46,7 @@ class PreprocessedVideoDataset(Dataset):
                     # Spatial augmentations that apply to both image and control
                     A.HorizontalFlip(p=augment_prob),
                     A.RandomResizedCrop(size=(640, 640), scale=(0.8, 1.0), p=augment_prob),
-                    A.Rotate(limit=15, p=augment_prob, fill=(114, 114, 114)),
+                    A.Rotate(limit=15, p=augment_prob, fill=(114, 114, 114), fill_mask=(114, 114, 114)),
                     # Color augmentations only for the input image
                     A.OneOf(
                         [
@@ -187,17 +188,23 @@ class PreprocessedVideoDataset(Dataset):
             # Group annotations by frame index
             frame_annotations = {}
 
+            frames_to_skip = set()
             for entity in annotation["entities"]:
-                # Don't skip, but mark crowd annotations
-                is_crowd = False
-                if "labels" in entity and isinstance(entity["labels"], dict):
-                    is_crowd = entity["labels"].get("crowd") == 1 or entity["labels"].get("fully_occluded") == 1
-
+                # skip, but mark crowd annotations
                 frame_idx = entity["blob"]["frame_idx"]
 
+                if "labels" in entity and isinstance(entity["labels"], dict):
+                    if entity["labels"].get("crowd") == 1:
+                        frames_to_skip.add(frame_idx)
+                        continue
+
+                if entity["labels"].get("fully_occluded") == 1 or entity["labels"].get("reflection") == 1:
+                    continue
+
                 # Get rid of frames w.o. normal control images
-                if frame_idx <= fps * 5:
+                if frame_idx <= fps * self.control_stack_length:
                     # print(f"Skipping frame {frame_idx} for video {video_id}")
+                    frames_to_skip.add(frame_idx)
                     continue
 
                 if frame_idx not in frame_annotations:
@@ -219,12 +226,18 @@ class PreprocessedVideoDataset(Dataset):
                         continue
 
                 frame_annotations[frame_idx].append(
-                    {"bbox": bbox, "id": entity["id"], "labels": entity["labels"], "confidence": entity.get("confidence", 1), "is_crowd": is_crowd}
+                    {
+                        "bbox": bbox,
+                        "id": entity["id"],
+                        "labels": entity["labels"],
+                        "confidence": entity.get("confidence", 1),
+                    }
                 )
 
             # Create a sample for each frame with annotations
             for frame_idx, annotations in frame_annotations.items():
-
+                if frame_idx in frames_to_skip:
+                    continue
                 # Construct file paths
                 current_frame_path = video_dir / f"frame_{frame_idx:06d}.jpg"
                 control_image_path = self.control_dir / video_id / f"control_{frame_idx:06d}.jpg"

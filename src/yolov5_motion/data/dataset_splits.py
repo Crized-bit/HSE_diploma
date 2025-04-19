@@ -1,3 +1,4 @@
+from calendar import c
 import json
 import random
 import torch
@@ -11,8 +12,16 @@ random.seed(42)
 np.random.seed(42)
 torch.manual_seed(42)
 
+
 def create_dataset_splits(
-    preprocessed_dir, annotations_dir, splits_file, prev_frame_time_diff=1.0, val_ratio=0.1, augment=True, augment_prob=0.5
+    preprocessed_dir,
+    annotations_dir,
+    splits_file,
+    prev_frame_time_diff=1.0,
+    val_ratio=0.1,
+    augment=True,
+    augment_prob=0.5,
+    control_stack_length=15,
 ):
     """
     Create train, test, and validation dataset splits using the provided splits file.
@@ -29,7 +38,6 @@ def create_dataset_splits(
         Dictionary containing train, val, and test datasets
     """
 
-
     # Load the dataset
     base_dataset = PreprocessedVideoDataset(
         preprocessed_dir=preprocessed_dir,
@@ -37,6 +45,7 @@ def create_dataset_splits(
         prev_frame_time_diff=prev_frame_time_diff,
         augment=augment,
         augment_prob=augment_prob,
+        control_stack_length=control_stack_length,
     )
 
     # Load the splits file
@@ -47,9 +56,9 @@ def create_dataset_splits(
     test_videos = [Path(video_path).stem for video_path in splits["test"]]
     train_videos = [Path(video_path).stem for video_path in splits["train"]]
 
-    val_size = int(len(train_videos) * val_ratio)
-    val_videos = train_videos[:val_size]
-    train_videos = train_videos[val_size:]
+    val_size = int(len(test_videos) * val_ratio)
+    val_videos = test_videos[:val_size]
+    test_videos = test_videos[val_size:]
 
     # Create indices for each split
     train_indices = []
@@ -73,15 +82,25 @@ def create_dataset_splits(
 
     # Create three separate datasets with appropriate augmentation settings
     train_dataset = PreprocessedVideoDataset(
-        preprocessed_dir=preprocessed_dir, annotations_dir=annotations_dir, augment=True  # Enable augmentation only for training
+        preprocessed_dir=preprocessed_dir,
+        annotations_dir=annotations_dir,
+        augment=True,
+        augment_prob=augment_prob,
+        control_stack_length=control_stack_length,  # Enable augmentation only for training
     )
 
     val_dataset = PreprocessedVideoDataset(
-        preprocessed_dir=preprocessed_dir, annotations_dir=annotations_dir, augment=False  # No augmentation for validation
+        preprocessed_dir=preprocessed_dir,
+        annotations_dir=annotations_dir,
+        augment=False,
+        control_stack_length=control_stack_length,  # No augmentation for validation
     )
 
     test_dataset = PreprocessedVideoDataset(
-        preprocessed_dir=preprocessed_dir, annotations_dir=annotations_dir, augment=False  # No augmentation for testing
+        preprocessed_dir=preprocessed_dir,
+        annotations_dir=annotations_dir,
+        augment=False,
+        control_stack_length=control_stack_length,  # No augmentation for testing
     )
 
     # Use the indices with Subset to get the right samples for each dataset
