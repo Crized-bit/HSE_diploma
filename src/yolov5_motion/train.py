@@ -376,7 +376,7 @@ class Trainer:
             for ann in annotations:
                 # Extract bounding box
                 bbox = torch.tensor(ann["bbox"], dtype=torch.float32)
-
+                is_crowd = ann["is_crowd"]
                 # Normalize coordinates to [0,1]
                 normalized_bbox = torch.zeros_like(bbox)
                 normalized_bbox[0] = bbox[0] / img_size  # normalize center_x
@@ -387,8 +387,8 @@ class Trainer:
                 # Для модели с единственным классом (человек), используем class_idx = 0
                 class_idx = 0
 
-                # Create target row [batch_idx, class_idx, x, y, w, h]
-                target_row = torch.tensor([batch_idx, class_idx, *normalized_bbox], dtype=torch.float32)
+                # Create target row [batch_idx, class_idx, x, y, w, h, ignore_flag]
+                target_row = torch.tensor([batch_idx, class_idx, *normalized_bbox, is_crowd], dtype=torch.float32)
                 all_targets.append(target_row)
 
         # Combine all target rows

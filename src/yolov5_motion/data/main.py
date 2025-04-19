@@ -23,7 +23,7 @@ def main():
         default="/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations",
         help="Directory containing annotation files",
     )
-    parser.add_argument("--output_dir", type=str, default="/home/jovyan/p.kudrevatyh/difference", help="Directory to save preprocessed frames")
+    parser.add_argument("--output_dir", type=str, default="/home/jovyan/p.kudrevatyh/bg_subtraction", help="Directory to save preprocessed frames")
     parser.add_argument(
         "--splits_file", type=str, default="/home/jovyan/p.kudrevatyh/yolov5_motion/data/splits.json", help="Path to splits JSON file"
     )
@@ -32,11 +32,11 @@ def main():
     parser.add_argument("--skip_preprocessing", action="store_true", help="Skip preprocessing step")
     parser.add_argument("--prev_frame_time_diff", type=float, default=1.0, help="Time difference in seconds to get the previous frame")
     parser.add_argument("--resize_to", type=int, nargs=2, default=[640, 640], help="Target size (width, height) for resizing frames")
-    parser.add_argument("--control_mode", type=str, default="difference", help="Control mode for preprocessing")
+    parser.add_argument("--control_mode", type=str, default="bg_subtraction", help="Control mode for preprocessing")
 
     # Dataset and dataloader options
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size for dataloaders")
-    parser.add_argument("--num_workers", type=int, default=8, help="Number of workers for data loading")
+    parser.add_argument("--num_workers", type=int, default=14, help="Number of workers for data loading")
     parser.add_argument("--val_ratio", type=float, default=0.1, help="Ratio of training data to use for validation")
 
     # Visualization options

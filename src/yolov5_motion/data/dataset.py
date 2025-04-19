@@ -188,13 +188,10 @@ class PreprocessedVideoDataset(Dataset):
             frame_annotations = {}
 
             for entity in annotation["entities"]:
-                # Skip reflections
+                # Don't skip, but mark crowd annotations
+                is_crowd = False
                 if "labels" in entity and isinstance(entity["labels"], dict):
-                    if (
-                        entity["labels"].get("crowd") == 1
-                        or entity["labels"].get("fully_occluded") == 1
-                    ):
-                        continue  # Skip this annotation
+                    is_crowd = entity["labels"].get("crowd") == 1 or entity["labels"].get("fully_occluded") == 1
 
                 frame_idx = entity["blob"]["frame_idx"]
 
@@ -222,7 +219,7 @@ class PreprocessedVideoDataset(Dataset):
                         continue
 
                 frame_annotations[frame_idx].append(
-                    {"bbox": bbox, "id": entity["id"], "labels": entity["labels"], "confidence": entity["confidence"]}
+                    {"bbox": bbox, "id": entity["id"], "labels": entity["labels"], "confidence": entity.get("confidence", 1), "is_crowd": is_crowd}
                 )
 
             # Create a sample for each frame with annotations

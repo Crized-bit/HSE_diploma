@@ -43,9 +43,9 @@ class ComputeLoss:
         self.balance = {3: [4.0, 1.0, 0.4]}.get(m.nl, [4.0, 1.0, 0.25, 0.06, 0.02])  # P3-P7
         self.ssi = list(m.stride).index(16) if autobalance else 0  # stride 16 index
         self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, 1.0, h, autobalance
-        self.na = m.na  # number of anchors
-        self.nc = m.nc  # number of classes
-        self.nl = m.nl  # number of layers
+        self.number_of_anchors = m.na  # number of anchors
+        self.number_of_classes = m.nc  # number of classes
+        self.number_of_pred_layers = m.nl  # number of layers
         self.anchors = m.anchors
         self.device = device
 
@@ -54,7 +54,7 @@ class ComputeLoss:
         lcls = torch.zeros(1, device=self.device)  # class loss
         lbox = torch.zeros(1, device=self.device)  # box loss
         lobj = torch.zeros(1, device=self.device)  # object loss
-        tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
+        tcls, tbox, indices, anchors, crowd_masks = self.build_targets(p, targets)  # targets
         # p = [pi[..., :6] for pi in p]
         # Losses
         for i, pi in enumerate(p):  # layer index, layer predictions
@@ -62,15 +62,20 @@ class ComputeLoss:
             tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=self.device)  # target obj
 
             if n := b.shape[0]:
+
+                is_crowd_mask = crowd_masks[i]
+                non_crowd_mask = ~is_crowd_mask
+
                 # pxy, pwh, _, pcls = pi[b, a, gj, gi].tensor_split((2, 4, 5), dim=1)  # faster, requires torch 1.8.0
-                pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.nc), 1)  # target-subset of predictions
+                pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.number_of_classes), 1)  # target-subset of predictions
 
                 # Regression
                 pxy = pxy.sigmoid() * 2 - 0.5
                 pwh = (pwh.sigmoid() * 2) ** 2 * anchors[i]
                 pbox = torch.cat((pxy, pwh), 1)  # predicted box
                 iou = bbox_iou(pbox, tbox[i], CIoU=True).squeeze()  # iou(prediction, target)
-                lbox += (1.0 - iou).mean()  # iou loss
+                if torch.any(non_crowd_mask):
+                    lbox += (1.0 - iou[non_crowd_mask]).mean()
 
                 # Objectness
                 iou = iou.detach().clamp(0).type(tobj.dtype)
@@ -79,13 +84,16 @@ class ComputeLoss:
                     b, a, gj, gi, iou = b[j], a[j], gj[j], gi[j], iou[j]
                 if self.gr < 1:
                     iou = (1.0 - self.gr) + self.gr * iou
-                tobj[b, a, gj, gi] = iou  # iou ratio
+                tobj[b, a, gj, gi] = iou * non_crowd_mask  # iou ratio
 
                 # Classification
-                if self.nc > 1:  # cls loss (only if multiple classes)
-                    t = torch.full_like(pcls, self.cn, device=self.device)  # targets
+                if self.number_of_classes > 1:  # cls loss (only if multiple classes)
+                    t = torch.full_like(pcls, self.cn, device=self.device)
                     t[range(n), tcls[i]] = self.cp
-                    lcls += self.BCEcls(pcls, t)  # BCE
+                    lcls += self.BCEcls(pcls[non_crowd_mask], t[non_crowd_mask])
+
+                # Mask loss with crowd mask. -20 with cls 0 gives us almost zero loss!
+                pi[..., 4][b, a, gj, gi][is_crowd_mask] = -20
 
             obji = self.BCEobj(pi[..., 4], tobj)
             lobj += obji * self.balance[i]  # obj loss
@@ -105,11 +113,24 @@ class ComputeLoss:
         """Prepares model targets from input targets (image,class,x,y,w,h) for loss computation, returning class, box,
         indices, and anchors.
         """
-        na, nt = self.na, targets.shape[0]  # number of anchors, targets
+        n_anch, n_targ = self.number_of_anchors, targets.shape[0]  # number of anchors, targets
         tcls, tbox, indices, anch = [], [], [], []
+
+        # Extract crowd information from targets
+        # Assuming an additional column is added to targets to indicate crowd status
+        is_crowd = torch.zeros(n_targ, dtype=torch.bool, device=self.device)
+        if targets.shape[1] > 6:  # If we have crowd information
+            is_crowd = targets[:, 6].bool()
+            # Continue with standard format for the rest of build_targets
+            targets_std = targets[:, :6].clone()
+        else:
+            targets_std = targets.clone()
+
+        crowd_masks = []
+
         gain = torch.ones(7, device=self.device)  # normalized to gridspace gain
-        ai = torch.arange(na, device=self.device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
-        targets = torch.cat((targets.repeat(na, 1, 1), ai[..., None]), 2)  # append anchor indices
+        ai = torch.arange(n_anch, device=self.device).float().view(n_anch, 1).repeat(1, n_targ)  # same as .repeat_interleave(nt)
+        targets = torch.cat((targets_std.repeat(n_anch, 1, 1), ai[..., None]), 2)  # (img_id, class, x, y, w, h, anchor_id)
 
         g = 0.5  # bias
         off = (
@@ -127,18 +148,21 @@ class ComputeLoss:
             * g
         )  # offsets
 
-        for i in range(self.nl):
+        for i in range(self.number_of_pred_layers):
             anchors, shape = self.anchors[i], p[i].shape
             gain[2:6] = torch.tensor(shape)[[3, 2, 3, 2]]  # xyxy gain
 
             # Match targets to anchors
             t = targets * gain  # shape(3,n,7)
-            if nt:
+
+            if n_targ:
                 # Matches
                 r = t[..., 4:6] / anchors[:, None]  # wh ratio
                 j = torch.max(r, 1 / r).max(2)[0] < self.hyp["anchor_t"]  # compare
                 # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
+                is_crowd_expanded = is_crowd.expand(n_anch, n_targ)  # repeat as targets, so (n_anch, n_targ)
                 t = t[j]  # filter
+                layer_is_crowd = is_crowd_expanded[j]
 
                 # Offsets
                 gxy = t[:, 2:4]  # grid xy
@@ -146,10 +170,15 @@ class ComputeLoss:
                 j, k = ((gxy % 1 < g) & (gxy > 1)).T
                 l, m = ((gxi % 1 < g) & (gxi > 1)).T
                 j = torch.stack((torch.ones_like(j), j, k, l, m))
+
+                layer_is_crowd_expanded = layer_is_crowd.repeat(5, 1)
+
                 t = t.repeat((5, 1, 1))[j]
+                layer_is_crowd = layer_is_crowd_expanded[j]
                 offsets = (torch.zeros_like(gxy)[None] + off[:, None])[j]
             else:
                 t = targets[0]
+                layer_is_crowd = torch.zeros(0, dtype=torch.bool, device=self.device)
                 offsets = 0
 
             # Define
@@ -163,5 +192,6 @@ class ComputeLoss:
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
             anch.append(anchors[a])  # anchors
             tcls.append(c)  # class
+            crowd_masks.append(layer_is_crowd)
 
-        return tcls, tbox, indices, anch
+        return tcls, tbox, indices, anch, crowd_masks

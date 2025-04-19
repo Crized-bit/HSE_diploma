@@ -56,6 +56,7 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
 
         # Канал 1 (Green): разница в изображениях
         diff = np.clip(raw_diff, 0, 255).astype(np.uint8)
+        diff = cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX)
         result[:, :, 1] = diff
 
         # Create background model from frame stack
@@ -68,6 +69,8 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
 
         # Канал 2 (Blue): маска от BG
         fg_mask = bg_subtractor.apply(cur_image)
+
+        fg_mask = cv2.normalize(fg_mask, None, 0, 255, cv2.NORM_MINMAX)
 
         result[:, :, 2] = fg_mask
         return result
@@ -88,20 +91,21 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
 
         # Create control image from foreground mask
         result = cv2.cvtColor(fg_mask, cv2.COLOR_GRAY2RGB)
+
+        # Normalize the result
+        result = cv2.normalize(result, None, 0, 255, cv2.NORM_MINMAX)
         return result
 
     else:
         raise ValueError(f"Unknown mode: {mode}. Valid modes are 'flow', 'difference', 'diff_color', 'bg_subtraction'")
 
 
-def cxcywh_to_xyxy(bbox, img_width=640, img_height=640):
+def cxcywh_to_xyxy(bbox):
     """
     Convert bbox from [center_x, center_y, width, height] to [x1, y1, x2, y2] format.
 
     Args:
         bbox: Bounding box in [center_x, center_y, width, height] format
-        img_width: Image width (for normalization if needed)
-        img_height: Image height (for normalization if needed)
 
     Returns:
         Bounding box in [x1, y1, x2, y2] format
@@ -112,26 +116,6 @@ def cxcywh_to_xyxy(bbox, img_width=640, img_height=640):
     x2 = cx + w / 2
     y2 = cy + h / 2
     return [x1, y1, x2, y2]
-
-
-def xyxy_to_cxcywh(bbox, img_width=640, img_height=640):
-    """
-    Convert bbox from [x1, y1, x2, y2] to [center_x, center_y, width, height] format.
-
-    Args:
-        bbox: Bounding box in [x1, y1, x2, y2] format
-        img_width: Image width (for normalization if needed)
-        img_height: Image height (for normalization if needed)
-
-    Returns:
-        Bounding box in [center_x, center_y, width, height] format
-    """
-    x1, y1, x2, y2 = bbox
-    cx = (x1 + x2) / 2
-    cy = (y1 + y2) / 2
-    w = x2 - x1
-    h = y2 - y1
-    return [cx, cy, w, h]
 
 
 def draw_bounding_boxes(image, annotations, color=(0, 255, 0), thickness=2):

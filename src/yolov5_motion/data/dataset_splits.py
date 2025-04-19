@@ -6,9 +6,13 @@ from pathlib import Path
 import numpy as np
 from yolov5_motion.data.dataset import PreprocessedVideoDataset, collate_fn
 
+# Set random seed for reproducibility
+random.seed(42)
+np.random.seed(42)
+torch.manual_seed(42)
 
 def create_dataset_splits(
-    preprocessed_dir, annotations_dir, splits_file, prev_frame_time_diff=1.0, val_ratio=0.1, seed=42, augment=True, augment_prob=0.5
+    preprocessed_dir, annotations_dir, splits_file, prev_frame_time_diff=1.0, val_ratio=0.1, augment=True, augment_prob=0.5
 ):
     """
     Create train, test, and validation dataset splits using the provided splits file.
@@ -24,10 +28,7 @@ def create_dataset_splits(
     Returns:
         Dictionary containing train, val, and test datasets
     """
-    # Set random seed for reproducibility
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+
 
     # Load the dataset
     base_dataset = PreprocessedVideoDataset(
@@ -43,8 +44,8 @@ def create_dataset_splits(
         splits = json.load(f)
 
     # Create mappings for each split
-    test_videos = set([Path(video_path).stem for video_path in splits["test"]])
-    train_videos = list(set([Path(video_path).stem for video_path in splits["train"]]))
+    test_videos = [Path(video_path).stem for video_path in splits["test"]]
+    train_videos = [Path(video_path).stem for video_path in splits["train"]]
 
     val_size = int(len(train_videos) * val_ratio)
     val_videos = train_videos[:val_size]

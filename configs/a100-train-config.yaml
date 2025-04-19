@@ -15,7 +15,7 @@ model:
   img_size: 640
   num_classes: 80
   train_all: false
-  train_controlnet: false
+  train_controlnet: true
   train_head: true
 
 # Training parameters optimized for A100
@@ -29,8 +29,8 @@ training:
   val_ratio: 0.1
   
   # Prodigy works well with large batch sizes on A100
-  optimizer: "adam"  
-  lr: 0.0002
+  optimizer: "prodigy"  
+  lr: 1.0
   weight_decay: 0.01
   momentum: 0.937
   
@@ -59,4 +59,4 @@ training:
   augment: true
   augment_prob: 0.5
 
-  disable_controlnet: true
+  disable_controlnet: false
