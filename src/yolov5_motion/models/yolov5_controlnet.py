@@ -9,15 +9,46 @@ import sys
 
 sys.path.append("/home/jovyan/p.kudrevatyh/yolov5")
 
-from models.yolo import Model as YOLOv5Model  # type: ignore
+from models.yolo import Detect, Segment, Model as YOLOv5Model  # type: ignore
 from utils.general import check_img_size  # type: ignore
 from utils.torch_utils import model_info  # type: ignore
 
 from yolov5_motion.models.blocks import ControlNetModel
+import peft
+
+
+class CustomYOLOwithPEFT(YOLOv5Model):
+    def _apply(self, fn):
+        """Applies transformations like to(), cpu(), cuda(), half() to model tensors excluding parameters or registered
+        buffers.
+        """
+        if hasattr(self.model, 'base_model'):
+            m = self.model.base_model.model[-1]
+        else:
+            m = self.model[-1]
+        if isinstance(m, (Detect, Segment)):
+            m.stride = fn(m.stride)
+            m.grid = list(map(fn, m.grid))
+            if isinstance(m.anchor_grid, list):
+                m.anchor_grid = list(map(fn, m.anchor_grid))
+        return torch.nn.Module._apply(self, fn)
 
 
 class YOLOv5WithControlNet(nn.Module):
-    def __init__(self, cfg="yolov5m.yaml", ch=3, nc=80, anchors=None, yolo_weights=None, alpha: float = 1.0):
+    def __init__(
+        self,
+        cfg="yolov5m.yaml",
+        ch=3,
+        nc=80,
+        anchors=None,
+        yolo_weights=None,
+        controlnet_weights=None,
+        lora_weights=None,
+        lora_scale: float = 1.0,
+        control_scale: float = 1.0,
+        lora_alpha: float = 16.0,
+        lora_rank: int = 32,
+    ):
         """
         Initializes YOLOv5 model with ControlNet integration
 
@@ -29,7 +60,7 @@ class YOLOv5WithControlNet(nn.Module):
         """
         super().__init__()
         # Initialize YOLOv5 base model
-        self.yolo = YOLOv5Model(cfg, ch=ch, nc=nc, anchors=anchors)
+        self.yolo = CustomYOLOwithPEFT(cfg, ch=ch, nc=nc, anchors=anchors)
 
         if yolo_weights is not None:
             current_model_dict = self.yolo.state_dict()
@@ -41,10 +72,27 @@ class YOLOv5WithControlNet(nn.Module):
             print("missing_keys:", missing_keys)
             print("unexpected:", unexpected)
             print(f"Loaded YOLOv5 weights from file")
+        config = peft.LoraConfig(
+            r=lora_rank, lora_alpha=lora_alpha, target_modules=r"1[7-9].*\.conv|2[0-3].*\.conv|24\.m\.[0-2]", bias="none"
+        )
         # Initialize ControlNet with the YOLOv5 model
         self.controlnet = ControlNetModel(self.yolo)
+        if controlnet_weights is not None:
+            self.controlnet.load_state_dict(controlnet_weights)
+            print(f"Loaded ControlNet weights from file")
 
-        self.alpha = alpha
+        if not lora_weights:
+            self.yolo.model = peft.get_peft_model(self.yolo.model, config)
+        else:
+            self.yolo.model = peft.PeftModel.from_pretrained(
+                self.yolo.model,
+                lora_weights,
+                adapter_name="default",
+                is_trainable=False,
+                adapter_scale=lora_scale,  # Установка масштаба при загрузке
+            )
+
+        self.control_scale = control_scale
         # Flag to enable/disable ControlNet during inference
         self.use_controlnet = True
 
@@ -53,6 +101,18 @@ class YOLOv5WithControlNet(nn.Module):
             param.requires_grad = False
 
         print(model_info(self, verbose=True))
+
+        total_params = 0
+        trainable_params = 0
+        for name, param in self.yolo.model.base_model.named_parameters():
+            total_params += param.numel()
+            if "lora" in name:
+                trainable_params += param.numel()
+
+        # Вычисление процента
+        percentage = (trainable_params / total_params) * 100
+        print(f"LoRA добавляет {percentage:.2f}% к общему количеству параметров")
+
     def forward(self, x, condition_img=None):
         """
         Forward pass through the combined model
@@ -74,7 +134,7 @@ class YOLOv5WithControlNet(nn.Module):
         # Initial processing through YOLO backbone
         y = []  # outputs
         i = 0
-        for idx, m in enumerate(self.yolo.model):
+        for idx, m in enumerate(self.yolo.model.base_model.model):
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]
 
@@ -83,7 +143,7 @@ class YOLOv5WithControlNet(nn.Module):
 
             # Store feature map before modifications if it's a control point
             if self.use_controlnet and condition_img is not None and idx in control_indices:
-                x = x + self.alpha * control_outputs[i]
+                x = x + self.control_scale * control_outputs[i]
                 i += 1
             # Store output
             y.append(x if m.i in self.yolo.save else None)
@@ -97,16 +157,11 @@ class YOLOv5WithControlNet(nn.Module):
         for param in self.controlnet.parameters():
             param.requires_grad = True
 
-    def train_all(self):
-        """Set model to train all parameters"""
-        for param in self.parameters():
-            param.requires_grad = True
-
-    def train_head(self):
-        """Set model to train only YOLOv5 head parameters"""
-        # Freeze YOLOv5 parameters except for head
-        for name, param in self.yolo.named_parameters():
-            if name.startswith("model.24"):
+    def train_lora(self):
+        """Set model to train only LoRA parameters"""
+        # Unfreeze LoRA parameters
+        for name, param in self.yolo.model.base_model.named_parameters():
+            if "lora" in name:
                 param.requires_grad = True
 
     def save_controlnet(self, path):
@@ -117,17 +172,26 @@ class YOLOv5WithControlNet(nn.Module):
         """
         torch.save(self.controlnet.state_dict(), path)
 
-    def load_controlnet(self, path):
-        """Load only the ControlNet part of the model
+    def save_lora(self, path):
+        """Save only the LoRA part of the model
 
         Args:
-            path: path to the ControlNet state dict
+            path: path to save the LoRA state dict
         """
-        self.controlnet.load_state_dict(torch.load(path, map_location="cpu"))
+        # TODO: save
+        self.yolo.model.save_pretrained(path)
+    
+    def disable_lora(self):
+        self.yolo.model.disable_adapter_layers()
+    
+    def enable_lora(self):
+        self.yolo.model.enable_adapter_layers()
 
 
 # Helper function to create the combined model
-def create_combined_model(cfg, yolo_weights=None, controlnet_weights=None, img_size=640, nc=80):
+def create_combined_model(
+    cfg, yolo_weights=None, controlnet_weights=None, lora_weights=None, img_size=640, nc=80, lora_scale=1.0, control_scale=1.0
+):
     """
     Create YOLOv5 with ControlNet integration
 
@@ -160,16 +224,15 @@ def create_combined_model(cfg, yolo_weights=None, controlnet_weights=None, img_s
         state_dict = None
 
     # Create model
-    model = YOLOv5WithControlNet(cfg=cfg, nc=nc, yolo_weights=state_dict)
-
-    # Load ControlNet weights if provided
-    if controlnet_weights:
-        if controlnet_weights.endswith(".pt"):
-            if os.path.exists(controlnet_weights):
-                model.load_controlnet(controlnet_weights)
-                print(f"Loaded ControlNet weights from {controlnet_weights}")
-            else:
-                print(f"Warning: ControlNet weights file {controlnet_weights} not found")
+    model = YOLOv5WithControlNet(
+        cfg=cfg,
+        nc=nc,
+        yolo_weights=state_dict,
+        controlnet_weights=controlnet_weights,
+        lora_weights=lora_weights,
+        lora_scale=lora_scale,
+        control_scale=control_scale,
+    )
 
     # Make sure img_size is divisible by stride
     gs = max(int(model.yolo.stride.max()), 32)
@@ -298,7 +361,6 @@ class GradientTracker:
 
 # Example usage
 if __name__ == "__main__":
-    from torchviz import make_dot
 
     # Create model with pretrained weights
     weights = "/home/jovyan/p.kudrevatyh/yolov5m.pt"
@@ -314,22 +376,17 @@ if __name__ == "__main__":
     # Example of saving and loading just the ControlNet portion
     # After training
     checkpoint = {
-            "epoch": 0,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": None,
-            "global_step": None,
-            "best_val_loss": None,
-        }
+        "epoch": 0,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": None,
+        "global_step": None,
+        "best_val_loss": None,
+    }
 
-        # Save regular checkpoint
-    checkpoint_path = Path("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/base_model/checkpoints") / f"best_model.pt"
+    # Save regular checkpoint
+    checkpoint_path = Path("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/lora/checkpoints") / f"best_model.pt"
     torch.save(checkpoint, checkpoint_path)
-
-    exit(0)
-    # Later, to load a pretrained ControlNet
-    new_model = create_combined_model(
-        cfg="/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml", yolo_weights=weights, controlnet_weights="controlnet_weights.pt", nc=1
-    )
+    model.save_lora("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/lora/checkpoints/lora.pt")
 
     # Example inputs (batch size 1, RGB images)
     input_img = torch.randn(1, 3, 640, 640)
@@ -338,13 +395,9 @@ if __name__ == "__main__":
     # Run inference
     # with torch.no_grad():
     outputs = model(input_img, condition_img)
-    make_dot(tuple(outputs), params=dict(list(model.named_parameters()))).render("rnn_torchviz", format="png")
+    # make_dot(tuple(outputs), params=dict(list(model.named_parameters()))).render("rnn_torchviz", format="png")
     print(f"Output shape: {[output.shape for output in outputs]}")
 
     # Training example
     print("Training only ControlNet parameters")
     model.train_controlnet()  # Train only ControlNet
-
-    # After some training, switch to training the full model
-    print("Training all parameters")
-    model.train_all()

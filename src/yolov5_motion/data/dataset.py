@@ -202,7 +202,7 @@ class PreprocessedVideoDataset(Dataset):
                     continue
 
                 # Get rid of frames w.o. normal control images
-                if frame_idx <= fps * self.control_stack_length:
+                if frame_idx <= fps * self.prev_frame_time_diff * self.control_stack_length:
                     # print(f"Skipping frame {frame_idx} for video {video_id}")
                     frames_to_skip.add(frame_idx)
                     continue

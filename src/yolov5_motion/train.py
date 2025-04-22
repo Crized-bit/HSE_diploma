@@ -1,126 +1,48 @@
-import argparse
+import torch
+import numpy as np
 import time
 import os
 import sys
 import torch
 import torch.optim as optim
-from pathlib import Path
-from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import json
 import matplotlib.pyplot as plt
-from tqdm import tqdm
+import shutil
 import cv2
+
+from pathlib import Path
+from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader
 from datetime import datetime
-from collections import defaultdict
-import matplotlib.cm as cm
+from dataclasses import asdict
+from prodigyopt import Prodigy
+from tqdm import tqdm
 
 # Add YOLOv5 directory to path to import YOLOv5 modules
 yolov5_dir = "/home/jovyan/p.kudrevatyh/yolov5"
 if os.path.exists(yolov5_dir):
     sys.path.append(yolov5_dir)
-    print(f"Added YOLOv5 directory to path: {yolov5_dir}")
-else:
-    print(f"Warning: YOLOv5 directory not found at {yolov5_dir}")
-
-# Import YOLOv5 modules for loss computation and bounding box processing
-try:
-    from utils.general import non_max_suppression, scale_boxes  # type: ignore
-
-    print("Successfully imported YOLOv5 computation modules")
-except ImportError as e:
-    print(f"Warning: Could not import YOLOv5 modules: {e}")
-    # print("Will use placeholder loss function instead")
+from utils.general import non_max_suppression, scale_boxes  # type: ignore
 
 # Import custom modules
 from yolov5_motion.models.yolov5_controlnet import create_combined_model, GradientTracker
 from yolov5_motion.data.dataset_splits import create_dataset_splits, get_dataloaders
 from yolov5_motion.utils.metrics import calculate_precision_recall, calculate_map
 from yolov5_motion.utils.loss import ComputeLoss
-# Try to import Prodigy optimizer if available
-try:
-    from prodigyopt import Prodigy
+from yolov5_motion.config import my_config
+from yolov5_motion.data.dataset import collate_fn
 
-    PRODIGY_AVAILABLE = True
-except ImportError:
-    PRODIGY_AVAILABLE = False
-    print("Prodigy optimizer not available. Will use Adam instead.")
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train YOLOv5 with ControlNet for Motion")
-
-    # Input directories
-    parser.add_argument("--preprocessed_dir", type=str, required=True, help="Directory containing preprocessed frames")
-    parser.add_argument("--annotations_dir", type=str, required=True, help="Directory containing annotation files")
-    parser.add_argument("--splits_file", type=str, required=True, help="Path to splits JSON file")
-
-    # Output directories
-    parser.add_argument("--output_dir", type=str, default="./output", help="Directory to save model checkpoints and logs")
-
-    # Model configuration
-    parser.add_argument("--yolo_weights", type=str, default=None, help="Path to YOLOv5 weights (.pt file)")
-    parser.add_argument("--controlnet_weights", type=str, default=None, help="Path to ControlNet weights (.pt file)")
-    parser.add_argument("--yolo_cfg", type=str, default="yolov5m.yaml", help="Path to YOLOv5 model configuration (.yaml file)")
-    parser.add_argument("--img_size", type=int, default=640, help="Input image size")
-    parser.add_argument("--num_classes", type=int, default=80, help="Number of classes in the dataset")
-
-    # Training parameters
-    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
-    parser.add_argument("--val_batch_size", type=int, default=32, help="Batch size for validation")
-    parser.add_argument("--workers", type=int, default=8, help="Number of data loading workers")
-    parser.add_argument("--lr", type=float, default=0.001, help="Initial learning rate")
-    parser.add_argument("--weight_decay", type=float, default=0.0005, help="Weight decay for optimizer")
-    parser.add_argument("--val_ratio", type=float, default=0.1, help="Ratio of training data to use for validation")
-
-    # Training mode
-    parser.add_argument("--train_controlnet", action="store_true", help="Train only the ControlNet")
-    parser.add_argument("--train_head", action="store_true", help="Train head of YOLOv5")
-    parser.add_argument("--train_all", action="store_true", help="Train all layers of YOLOv5 and ControlNet model")
-
-    # Augmentation parameters
-    parser.add_argument("--augment", action="store_true", help="Apply data augmentation")
-    parser.add_argument("--augment_prob", type=float, default=0.5, help="Probability of applying data augmentation")
-    # Optimizer selection
-    parser.add_argument("--optimizer", type=str, default="adam", choices=["adam", "sgd", "prodigy"], help="Optimizer to use for training")
-
-    # Detection metrics
-    parser.add_argument("--conf_thres", type=float, default=0.25, help="Confidence threshold for detection")
-    parser.add_argument("--iou_thres", type=float, default=0.45, help="IoU threshold for NMS")
-    parser.add_argument("--max_det", type=int, default=100, help="Maximum number of detections per image")
-
-    # Saving and logging
-
-    parser.add_argument("--save_interval", type=int, default=10, help="Interval (in epochs) to save model checkpoints")
-    parser.add_argument("--log_interval", type=int, default=10, help="Interval (in iterations) to log training progress")
-    parser.add_argument("--eval_interval", type=int, default=5, help="Interval (in epochs) to evaluate on validation set")
-
-    # Resume training
-    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume training from")
-
-    # Mixed precision training
-    parser.add_argument(
-        "--precision", type=str, default="fp32", choices=["fp32", "fp16", "bf16"], help="Precision for training (fp32, fp16, or bf16)"
-    )
-
-    # Loss weights
-    parser.add_argument("--box_weight", type=float, default=0.05, help="Weight for box loss")
-    parser.add_argument("--obj_weight", type=float, default=1.0, help="Weight for objectness loss")
-    parser.add_argument("--cls_weight", type=float, default=0.5, help="Weight for class loss")
-
-    return parser.parse_args()
 
 
 class Trainer:
-    def __init__(self, args):
-        self.args = args
+    def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.device}")
 
         # Create output directory with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.output_dir = Path(args.output_dir) / timestamp
+        checkpoint_name = my_config.training.checkpoint_name
+        self.output_dir = Path(my_config.data.output_dir) / checkpoint_name
         self.checkpoints_dir = self.output_dir / "checkpoints"
         self.logs_dir = self.output_dir / "logs"
         self.viz_dir = self.output_dir / "visualizations"
@@ -151,111 +73,94 @@ class Trainer:
         self.gradient_tracker = GradientTracker(self)
         # Save the arguments
         with open(self.output_dir / "args.json", "w") as f:
-            json.dump(vars(args), f, indent=4)
+            json.dump(asdict(my_config), f, indent=4)
 
         # Setup tensorboard
         self.writer = SummaryWriter(log_dir=str(self.logs_dir))
 
-        # Save the arguments
-        with open(self.output_dir / "args.json", "w") as f:
-            json.dump(vars(args), f, indent=4)
-
         # Load model
         print("Creating model...")
         self.model = create_combined_model(
-            cfg=args.yolo_cfg,
-            yolo_weights=args.yolo_weights,
-            controlnet_weights=args.controlnet_weights,
-            img_size=args.img_size,
-            nc=args.num_classes,
+            cfg=my_config.model.yolo_cfg,
+            yolo_weights=my_config.model.yolo_weights,
+            controlnet_weights=my_config.model.controlnet_weights,
+            img_size=my_config.model.img_size,
+            nc=my_config.model.num_classes,
         )
         self.model = self.model.to(self.device)
-        
-        if args.disable_controlnet:
+
+        if my_config.training.disable_controlnet:
             print("Disabling ControlNet...")
             self.model.use_controlnet = False
 
-        # Initialize loss function if YOLOv5 loss is available
-        try:
-            if hasattr(self.model.yolo, "hyp"):
-                self.compute_loss_fn = ComputeLoss(self.model.yolo)
-            else:
-                # Create default hyperparameters for loss function
-                default_hyp = {
-                    "box": args.box_weight,  # box loss gain
-                    "cls": args.cls_weight,  # cls loss gain
-                    "cls_pw": 0.0825,  # cls BCELoss positive_weight
-                    "obj": args.obj_weight,  # obj loss gain
-                    "obj_pw": 1.0,  # obj BCELoss positive_weight
-                    "fl_gamma": 0.0,  # focal loss gamma
-                    "anchor_t": 3.44,  # anchor-multiple threshold
-                }
-                # Set hyperparameters on the model
-                self.model.yolo.hyp = default_hyp
-                self.compute_loss_fn = ComputeLoss(self.model.yolo)
-        except NameError:
-            self.compute_loss_fn = None
-            print("Using placeholder loss function (YOLOv5 loss not available)")
+        if my_config.training.disable_lora:
+            print("Disabling LoRA...")
+            self.model.disable_lora()
 
-        # Set training mode
-        if args.train_head:
-            print("Training YOLOv5 head")
-            self.model.train_head()
+        # Create default hyperparameters for loss function
+        default_hyp = {
+            "box": my_config.training.loss.box_weight,  # box loss gain
+            "cls": my_config.training.loss.cls_weight,  # cls loss gain
+            "cls_pw": 0.0825,  # cls BCELoss positive_weight
+            "obj": my_config.training.loss.obj_weight,  # obj loss gain
+            "obj_pw": 1.0,  # obj BCELoss positive_weight
+            "fl_gamma": 0.0,  # focal loss gamma
+            "anchor_t": 3.44,  # anchor-multiple threshold
+        }
+        # Set hyperparameters on the model
+        self.model.yolo.hyp = default_hyp
+        self.compute_loss_fn = ComputeLoss(self.model.yolo)
 
-        if args.train_controlnet:
+        if my_config.model.train_controlnet:
             print("Training ControlNet")
             self.model.train_controlnet()
 
-        if args.train_all:
-            print("Training all parameters")
-            self.model.train_all()
+        if my_config.model.train_lora:
+            print("Training LoRA")
+            self.model.train_lora()
 
         # Create dataloaders
         print("Creating datasets and dataloaders...")
         self.datasets = create_dataset_splits(
-            preprocessed_dir=args.preprocessed_dir,
-            annotations_dir=args.annotations_dir,
-            splits_file=args.splits_file,
-            val_ratio=args.val_ratio,
-            augment=args.augment,  # Enable augmentation
-            augment_prob=args.augment_prob,
-            control_stack_length=args.control_stack_length,
+            preprocessed_dir=my_config.data.preprocessed_dir,
+            annotations_dir=my_config.data.annotations_dir,
+            splits_file=my_config.data.splits_file,
+            val_ratio=my_config.training.val_ratio,
+            augment=my_config.training.augment,  # Enable augmentation
+            augment_prob=my_config.training.augment_prob,
+            control_stack_length=my_config.data.control_stack_length,
+            prev_frame_time_diff=my_config.data.prev_frame_time_diff,
         )
 
-        self.dataloaders = get_dataloaders(datasets=self.datasets, batch_size=args.batch_size, num_workers=args.workers)
+        self.dataloaders = get_dataloaders(
+            datasets=self.datasets, batch_size=my_config.training.batch_size, num_workers=my_config.training.workers
+        )
 
         # Adjust validation batch size separately if specified
-        if args.val_batch_size != args.batch_size:
-            from torch.utils.data import DataLoader
-            from yolov5_motion.data.dataset import collate_fn
-
+        if my_config.training.batch_size != my_config.training.val_batch_size:
             self.dataloaders["val"] = DataLoader(
                 self.datasets["val"],
-                batch_size=args.val_batch_size,
+                batch_size=my_config.training.val_batch_size,
                 shuffle=False,
-                num_workers=args.workers,
+                num_workers=my_config.training.workers,
                 collate_fn=collate_fn,
                 pin_memory=True,
             )
 
         # Setup optimizer
         self.optimizer = self._create_optimizer()
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, self.args.epochs)
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, my_config.training.epochs)
         # Resume training if specified
         self.start_epoch = 0
-        if args.resume:
-            self._resume_checkpoint(args.resume)
+        if my_config.training.resume:
+            self._resume_checkpoint(my_config.training.resume)
 
         # Initialize training variables
         self.global_step = 0
         self.best_val_loss = float("inf")
 
         # Setup precision mode
-        self.precision = args.precision
-        if self.precision == "bf16" and not torch.cuda.is_bf16_supported():
-            print("Warning: BF16 not supported on this device. Falling back to FP32.")
-            self.precision = "fp32"
-
+        self.precision = my_config.training.precision
         print(f"Training with {self.precision} precision")
 
     def _create_optimizer(self):
@@ -263,19 +168,18 @@ class Trainer:
         # Get parameters that require gradients
         parameters = [p for p in self.model.parameters() if p.requires_grad]
 
-        if self.args.optimizer.lower() == "adam":
-            return optim.Adam(parameters, lr=self.args.lr, weight_decay=self.args.weight_decay)
-        elif self.args.optimizer.lower() == "sgd":
-            return optim.SGD(parameters, lr=self.args.lr, momentum=self.args.momentum, weight_decay=self.args.weight_decay)
-        elif self.args.optimizer.lower() == "prodigy":
-            if not PRODIGY_AVAILABLE:
-                print("Prodigy optimizer requested but not available. Using Adam instead.")
-                return optim.Adam(parameters, lr=self.args.lr, weight_decay=self.args.weight_decay)
-            else:
-                return Prodigy(parameters, lr=self.args.lr, weight_decay=self.args.weight_decay, safeguard_warmup=False, use_bias_correction=True)
+        if my_config.training.optimizer == "adam":
+            return optim.Adam(parameters, lr=my_config.training.lr, weight_decay=my_config.training.weight_decay)
+        elif my_config.training.optimizer == "prodigy":
+            return Prodigy(
+                parameters,
+                lr=my_config.training.lr,
+                weight_decay=my_config.training.weight_decay,
+                safeguard_warmup=False,
+                use_bias_correction=True,
+            )
         else:
-            print(f"Unknown optimizer {self.args.optimizer}, using Adam")
-            return optim.Adam(parameters, lr=self.args.lr, weight_decay=self.args.weight_decay)
+            raise ValueError(f"Unknown optimizer: {my_config.training.optimizer}")
 
     def _resume_checkpoint(self, checkpoint_path):
         """Resume training from a checkpoint"""
@@ -313,6 +217,10 @@ class Trainer:
         controlnet_path = self.checkpoints_dir / f"controlnet_epoch_{epoch}.pt"
         self.model.save_controlnet(controlnet_path)
 
+        # Save LoRA weights separately
+        lora_path = self.checkpoints_dir / f"lora_epoch_{epoch}"
+        self.model.save_lora(lora_path)
+
         # Save best model if this is the best
         if is_best:
             best_path = self.checkpoints_dir / "best_model.pt"
@@ -320,6 +228,12 @@ class Trainer:
 
             best_controlnet_path = self.checkpoints_dir / "best_controlnet.pt"
             self.model.save_controlnet(best_controlnet_path)
+
+            # Save LoRA weights separately
+            lora_path = self.checkpoints_dir / f"best_lora"
+            if lora_path.exists():
+                shutil.rmtree(lora_path)
+            self.model.save_lora(lora_path)
 
     def compute_loss(self, outputs, targets):
         """
@@ -333,29 +247,20 @@ class Trainer:
             (torch.Tensor): Total loss
             (dict): Loss components (box, obj, cls)
         """
-        # If YOLOv5 loss is available, use it
-        if self.compute_loss_fn is not None:
-            # Convert targets from our format to YOLOv5 format
-            yolo_targets = self._convert_targets_to_yolo_format(targets).to(self.device)
+        yolo_targets = self._convert_targets_to_yolo_format(targets).to(self.device)
 
-            # Compute loss
-            loss, loss_items = self.compute_loss_fn(outputs, yolo_targets)
+        # Compute loss
+        loss, loss_items = self.compute_loss_fn(outputs, yolo_targets)
 
-            # Extract individual loss components
-            if isinstance(loss_items, torch.Tensor) and len(loss_items) >= 3:
-                box_loss = loss_items[0]
-                obj_loss = loss_items[1]
-                cls_loss = loss_items[2]
-            else:
-                # Fallback if loss_items is not as expected
-                box_loss = torch.tensor(0.0, device=self.device)
-                obj_loss = torch.tensor(0.0, device=self.device)
-                cls_loss = torch.tensor(0.0, device=self.device)
+        # Extract individual loss components
+        box_loss = loss_items[0]
+        obj_loss = loss_items[1]
+        cls_loss = loss_items[2]
 
-            # Create metrics dictionary
-            metrics = {"box_loss": box_loss.item(), "obj_loss": obj_loss.item(), "cls_loss": cls_loss.item(), "total_loss": loss.item()}
+        # Create metrics dictionary
+        metrics = {"box_loss": box_loss.item(), "obj_loss": obj_loss.item(), "cls_loss": cls_loss.item(), "total_loss": loss.item()}
 
-            return loss, metrics
+        return loss, metrics
 
     def _convert_targets_to_yolo_format(self, targets):
         """
@@ -370,7 +275,7 @@ class Trainer:
         """
         # Initialize list to hold all target rows
         all_targets = []
-        img_size = self.args.img_size
+        img_size = my_config.model.img_size
 
         # Process each batch item
         for batch_idx, annotations in enumerate(targets):
@@ -406,7 +311,7 @@ class Trainer:
         epoch_loss = 0
         epoch_metrics = {"box_loss": 0, "obj_loss": 0, "cls_loss": 0}
 
-        pbar = tqdm(self.dataloaders["train"], desc=f"Epoch {epoch+1}/{self.args.epochs}")
+        pbar = tqdm(self.dataloaders["train"], desc=f"Epoch {epoch+1}/{my_config.training.epochs}")
 
         for i, batch in enumerate(pbar):
             # Get data and move to device
@@ -449,7 +354,7 @@ class Trainer:
             )
 
             # Log metrics at regular intervals
-            if i % self.args.log_interval == 0:
+            if i % my_config.training.log_interval == 0:
                 # Log to tensorboard
                 self.writer.add_scalar("train/loss", loss.item(), self.global_step)
                 self.writer.add_scalar("train/box_loss", metrics["box_loss"], self.global_step)
@@ -510,7 +415,10 @@ class Trainer:
 
                 # Get raw detection outputs
                 detections = non_max_suppression(
-                    predictions[0], conf_thres=self.args.conf_thres, iou_thres=self.args.iou_thres, max_det=self.args.max_det
+                    predictions[0],
+                    conf_thres=my_config.training.detection.conf_thres,
+                    iou_thres=my_config.training.detection.iou_thres,
+                    max_det=my_config.training.detection.max_det,
                 )
 
                 # Process each image in the batch
@@ -523,7 +431,9 @@ class Trainer:
                         # Convert to list format expected by metrics functions
                         for *xyxy, conf, cls_id in det:
                             if cls_id == 0:
-                                pred_boxes.append([xyxy[0].item(), xyxy[1].item(), xyxy[2].item(), xyxy[3].item(), conf.item(), cls_id.item()])
+                                pred_boxes.append(
+                                    [xyxy[0].item(), xyxy[1].item(), xyxy[2].item(), xyxy[3].item(), conf.item(), cls_id.item()]
+                                )
 
                     # Process ground truth
                     true_boxes = []
@@ -544,7 +454,7 @@ class Trainer:
                     # Calculate precision and recall for this image
                     if len(true_boxes) > 0 or len(pred_boxes) > 0:
                         precision, recall, f1 = calculate_precision_recall(
-                            pred_boxes, true_boxes, iou_threshold=0.5, conf_threshold=self.args.conf_thres
+                            pred_boxes, true_boxes, iou_threshold=0.5, conf_threshold=my_config.training.detection.conf_thres
                         )
 
                         precisions.append(precision)
@@ -641,10 +551,10 @@ class Trainer:
                 # Apply non-max suppression to get detections
                 detections = non_max_suppression(
                     predictions,
-                    conf_thres=self.args.conf_thres,
-                    iou_thres=self.args.iou_thres,
-                    max_det=self.args.max_det,  # Confidence threshold  # IoU threshold
-                )  # Maximum detections
+                    conf_thres=my_config.training.detection.conf_thres,
+                    iou_thres=my_config.training.detection.iou_thres,
+                    max_det=my_config.training.detection.max_det,
+                )
 
                 # Now create visualizations with both ground truth and predictions
                 for i in range(n_samples):
@@ -749,7 +659,7 @@ class Trainer:
 
         # Prepare data
         epochs = range(1, len(self.train_losses) + 1)
-        val_epochs = [e * self.args.eval_interval for e in range(1, len(self.val_losses) + 1)]
+        val_epochs = [e * my_config.training.eval_interval for e in range(1, len(self.val_losses) + 1)]
 
         # Plot total loss with markers for each point
         axs[0, 0].plot(epochs, self.train_losses, "b-", label="Training Loss", marker="o", markersize=4)
@@ -1054,18 +964,18 @@ class Trainer:
 
     def train(self):
         """Main training loop"""
-        print(f"Starting training for {self.args.epochs} epochs")
+        print(f"Starting training for {my_config.training.epochs} epochs")
 
         self.gradient_tracker.register_hooks()
 
         # Record start time for total training time calculation
         start_time = time.time()
 
-        for epoch in range(self.start_epoch, self.args.epochs):
+        for epoch in range(self.start_epoch, my_config.training.epochs):
             # Record epoch start time
             epoch_start = time.time()
 
-            print(f"\n{'='*20} Epoch {epoch+1}/{self.args.epochs} {'='*20}")
+            print(f"\n{'='*20} Epoch {epoch+1}/{my_config.training.epochs} {'='*20}")
 
             # Train for one epoch
             train_loss, train_metrics = self.train_epoch(epoch)
@@ -1076,7 +986,7 @@ class Trainer:
             print(f"Training: loss={train_loss:.4f}, " + ", ".join([f"{k}={v:.4f}" for k, v in train_metrics.items()]))
 
             # Validate if this is a validation epoch
-            if (epoch + 1) % self.args.eval_interval == 0:
+            if (epoch + 1) % my_config.training.eval_interval == 0:
                 val_loss, val_metrics = self.validate(epoch)
 
                 # Print validation summary
@@ -1091,7 +1001,7 @@ class Trainer:
                 is_best = False
 
             # Save checkpoint if this is a save epoch
-            if (epoch + 1) % self.args.save_interval == 0 or epoch == self.args.epochs - 1 or is_best:
+            if (epoch + 1) % my_config.training.save_interval == 0 or epoch == my_config.training.epochs - 1 or is_best:
                 self.save_checkpoint(epoch, is_best=is_best)
                 print(f"Saved checkpoint at epoch {epoch+1}")
 
@@ -1106,7 +1016,7 @@ class Trainer:
             # Estimate remaining time
             elapsed_time = time.time() - start_time
             epochs_done = epoch - self.start_epoch + 1
-            epochs_left = self.args.epochs - epoch - 1
+            epochs_left = my_config.training.epochs - epoch - 1
             estimated_time_left = (elapsed_time / epochs_done) * epochs_left if epochs_done > 0 else 0
 
             print(f"Elapsed time: {elapsed_time/3600:.2f} hours")
@@ -1117,7 +1027,7 @@ class Trainer:
         print(f"Total training time: {total_time/3600:.2f} hours")
 
         # Save final model
-        self.save_checkpoint(self.args.epochs - 1, is_best=False)
+        self.save_checkpoint(my_config.training.epochs - 1, is_best=False)
         print("Training completed!")
 
         self.gradient_tracker.remove_hooks()
@@ -1129,85 +1039,7 @@ class Trainer:
         self.writer.close()
 
 
-def main(config:str):
-    """
-    Main training function that can be called directly or imported.
-    Handles configuration loading and training initialization.
-    """
-    import yaml
-    import os
-    import torch
-    import numpy as np
-
-    # Load configuration from YAML file - inline implementation
-    with open(config, "r") as f:
-        config_dict = yaml.safe_load(f)
-
-    # Create a flat namespace for backwards compatibility - inline implementation
-    args = argparse.Namespace()
-
-    # Data paths
-    args.preprocessed_dir = config_dict["data"]["preprocessed_dir"]
-    args.annotations_dir = config_dict["data"]["annotations_dir"]
-    args.splits_file = config_dict["data"]["splits_file"]
-    args.output_dir = config_dict["data"]["output_dir"]
-    args.control_stack_length = config_dict["data"]["control_stack_length"]
-
-    # Model configuration
-    args.yolo_weights = config_dict["model"]["yolo_weights"]
-    args.controlnet_weights = config_dict["model"]["controlnet_weights"]
-    args.yolo_cfg = config_dict["model"]["yolo_cfg"]
-    args.img_size = config_dict["model"]["img_size"]
-    args.num_classes = config_dict["model"]["num_classes"]
-    args.train_controlnet = config_dict["model"]["train_controlnet"]
-    args.train_head = config_dict["model"]["train_head"]
-    args.train_all = config_dict["model"]["train_all"]
-
-    # Training parameters
-    args.epochs = config_dict["training"]["epochs"]
-    args.batch_size = config_dict["training"]["batch_size"]
-    args.val_batch_size = config_dict["training"]["val_batch_size"]
-    args.workers = config_dict["training"]["workers"]
-    args.val_ratio = config_dict["training"]["val_ratio"]
-
-    # Augmentation settings
-    args.augment = config_dict["training"]["augment"]
-    args.augment_prob = config_dict["training"]["augment_prob"]
-    
-    # Optimizer settings
-    args.optimizer = config_dict["training"]["optimizer"]
-    args.lr = config_dict["training"]["lr"]
-    args.weight_decay = config_dict["training"]["weight_decay"]
-    args.momentum = config_dict["training"]["momentum"]
-
-    # Loss weights
-    args.box_weight = config_dict["training"]["loss"]["box_weight"]
-    args.obj_weight = config_dict["training"]["loss"]["obj_weight"]
-    args.cls_weight = config_dict["training"]["loss"]["cls_weight"]
-
-    # Precision
-    args.precision = config_dict["training"]["precision"]
-
-    # Checkpointing
-    args.save_interval = config_dict["training"]["save_interval"]
-    args.log_interval = config_dict["training"]["log_interval"]
-    args.eval_interval = config_dict["training"]["eval_interval"]
-
-    # Detection
-    args.conf_thres = config_dict["training"]["detection"].get("conf_thres")
-    args.iou_thres = config_dict["training"]["detection"].get("iou_thres")
-    args.max_det = config_dict["training"]["detection"].get("max_det")
-
-    # Resume
-    args.resume = config_dict["training"]["resume"]
-
-    # Use controlnet at all
-    args.disable_controlnet = config_dict["training"]["disable_controlnet"]
-
-    # Save the resolved configuration
-    os.makedirs(args.output_dir, exist_ok=True)
-    with open(os.path.join(args.output_dir, "resolved_config.yaml"), "w") as f:
-        yaml.dump(config_dict, f, default_flow_style=False)
+def main():
 
     # Set random seeds for reproducibility
     torch.manual_seed(42)
@@ -1216,7 +1048,7 @@ def main(config:str):
     np.random.seed(42)
 
     # Create trainer and start training
-    trainer = Trainer(args)
+    trainer = Trainer()
     trainer.train()
 
 

@@ -89,6 +89,9 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
         # Get foreground mask for current frame
         fg_mask = bg_subtractor.apply(cur_image)
 
+        # fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8), iterations = 1,)
+        # fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8), iterations = 1,)
+
         # Create control image from foreground mask
         result = cv2.cvtColor(fg_mask, cv2.COLOR_GRAY2RGB)
 

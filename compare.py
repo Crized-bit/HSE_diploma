@@ -9,7 +9,11 @@ BASE_PATH = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs"
 # Здесь вы можете указать названия моделей для сравнения
 MODEL_NAMES = [
     "base_model",  # Замените на свои модели
-    "bg_sub_new",
+    # "bg_sub_new",
+    # "bg_sub_lora",
+    "lora",
+    # "bg_sub_0.2",
+    "bg_sub_0.2_lora",
     # Добавьте больше моделей при необходимости
 ]
 
