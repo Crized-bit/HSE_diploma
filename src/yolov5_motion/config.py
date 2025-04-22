@@ -1,5 +1,17 @@
+import json
+from dataclasses import asdict
 from dataclasses import dataclass, field
 from typing import Optional
+from yolov5_motion.models.blocks import ControlNetModel, ControlNetModelLora
+
+
+class EnhancedJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if hasattr(obj, "__dataclass_fields__"):
+            return {k: v for k, v in asdict(obj).items()}
+        if isinstance(obj, type):
+            return obj.__name__  # Convert type objects to their string name
+        return super().default(obj)
 
 
 @dataclass
@@ -14,13 +26,14 @@ class DataConfig:
 
 @dataclass
 class ModelConfig:
+    model_cls: type = ControlNetModelLora
     yolo_weights: str = "/home/jovyan/p.kudrevatyh/yolov5m.pt"
     controlnet_weights: Optional[str] = None
     yolo_cfg: str = "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml"
     img_size: int = 640
     num_classes: int = 80
-    train_lora: bool = True
-    train_controlnet: bool = False
+    train_lora: bool = False
+    train_controlnet: bool = True
 
 
 @dataclass
@@ -39,7 +52,7 @@ class DetectionConfig:
 
 @dataclass
 class TrainingConfig:
-    checkpoint_name: str = "test_chkp"
+    checkpoint_name: str = "bg_sub_lora_fixed"
     epochs: int = 200
     batch_size: int = 64
     val_batch_size: int = 128
@@ -66,8 +79,8 @@ class TrainingConfig:
     augment: bool = True
     augment_prob: float = 0.5
 
-    disable_controlnet: bool = True
-    disable_lora: bool = False
+    disable_controlnet: bool = False
+    disable_lora: bool = True
 
 
 @dataclass

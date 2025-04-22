@@ -1,11 +1,11 @@
-from matplotlib import pyplot as plt
-from pathlib import Path
+import peft
+from sympy import im
 import torch
 import torch.nn as nn
 import os
-
-# Import Ultralytics YOLOv5
 import sys
+from matplotlib import pyplot as plt
+from pathlib import Path
 
 sys.path.append("/home/jovyan/p.kudrevatyh/yolov5")
 
@@ -14,7 +14,7 @@ from utils.general import check_img_size  # type: ignore
 from utils.torch_utils import model_info  # type: ignore
 
 from yolov5_motion.models.blocks import ControlNetModel
-import peft
+from yolov5_motion.config import my_config
 
 
 class CustomYOLOwithPEFT(YOLOv5Model):
@@ -22,7 +22,7 @@ class CustomYOLOwithPEFT(YOLOv5Model):
         """Applies transformations like to(), cpu(), cuda(), half() to model tensors excluding parameters or registered
         buffers.
         """
-        if hasattr(self.model, 'base_model'):
+        if hasattr(self.model, "base_model"):
             m = self.model.base_model.model[-1]
         else:
             m = self.model[-1]
@@ -76,7 +76,7 @@ class YOLOv5WithControlNet(nn.Module):
             r=lora_rank, lora_alpha=lora_alpha, target_modules=r"1[7-9].*\.conv|2[0-3].*\.conv|24\.m\.[0-2]", bias="none"
         )
         # Initialize ControlNet with the YOLOv5 model
-        self.controlnet = ControlNetModel(self.yolo)
+        self.controlnet = my_config.model.model_cls(self.yolo)
         if controlnet_weights is not None:
             self.controlnet.load_state_dict(controlnet_weights)
             print(f"Loaded ControlNet weights from file")
@@ -152,10 +152,7 @@ class YOLOv5WithControlNet(nn.Module):
 
     def train_controlnet(self):
         """Set model to train only ControlNet parameters"""
-
-        # Unfreeze ControlNet parameters
-        for param in self.controlnet.parameters():
-            param.requires_grad = True
+        self.controlnet.train()
 
     def train_lora(self):
         """Set model to train only LoRA parameters"""
@@ -180,10 +177,10 @@ class YOLOv5WithControlNet(nn.Module):
         """
         # TODO: save
         self.yolo.model.save_pretrained(path)
-    
+
     def disable_lora(self):
         self.yolo.model.disable_adapter_layers()
-    
+
     def enable_lora(self):
         self.yolo.model.enable_adapter_layers()
 
@@ -375,18 +372,18 @@ if __name__ == "__main__":
     # print(model)
     # Example of saving and loading just the ControlNet portion
     # After training
-    checkpoint = {
-        "epoch": 0,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": None,
-        "global_step": None,
-        "best_val_loss": None,
-    }
+    # checkpoint = {
+    #     "epoch": 0,
+    #     "model_state_dict": model.state_dict(),
+    #     "optimizer_state_dict": None,
+    #     "global_step": None,
+    #     "best_val_loss": None,
+    # }
 
-    # Save regular checkpoint
-    checkpoint_path = Path("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/lora/checkpoints") / f"best_model.pt"
-    torch.save(checkpoint, checkpoint_path)
-    model.save_lora("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/lora/checkpoints/lora.pt")
+    # # Save regular checkpoint
+    # checkpoint_path = Path("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/lora/checkpoints") / f"best_model.pt"
+    # torch.save(checkpoint, checkpoint_path)
+    # model.save_lora("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/lora/checkpoints/lora.pt")
 
     # Example inputs (batch size 1, RGB images)
     input_img = torch.randn(1, 3, 640, 640)

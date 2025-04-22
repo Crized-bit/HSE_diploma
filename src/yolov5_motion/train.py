@@ -14,8 +14,6 @@ import cv2
 from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
-from datetime import datetime
-from dataclasses import asdict
 from prodigyopt import Prodigy
 from tqdm import tqdm
 
@@ -30,7 +28,7 @@ from yolov5_motion.models.yolov5_controlnet import create_combined_model, Gradie
 from yolov5_motion.data.dataset_splits import create_dataset_splits, get_dataloaders
 from yolov5_motion.utils.metrics import calculate_precision_recall, calculate_map
 from yolov5_motion.utils.loss import ComputeLoss
-from yolov5_motion.config import my_config
+from yolov5_motion.config import my_config, EnhancedJSONEncoder
 from yolov5_motion.data.dataset import collate_fn
 
 
@@ -73,7 +71,7 @@ class Trainer:
         self.gradient_tracker = GradientTracker(self)
         # Save the arguments
         with open(self.output_dir / "args.json", "w") as f:
-            json.dump(asdict(my_config), f, indent=4)
+            json.dump(my_config, f, indent=4, cls=EnhancedJSONEncoder)
 
         # Setup tensorboard
         self.writer = SummaryWriter(log_dir=str(self.logs_dir))
@@ -454,7 +452,7 @@ class Trainer:
                     # Calculate precision and recall for this image
                     if len(true_boxes) > 0 or len(pred_boxes) > 0:
                         precision, recall, f1 = calculate_precision_recall(
-                            pred_boxes, true_boxes, iou_threshold=0.5, conf_threshold=my_config.training.detection.conf_thres
+                            pred_boxes, true_boxes, iou_threshold=my_config.training.detection.iou_thres, conf_threshold=my_config.training.detection.conf_thres
                         )
 
                         precisions.append(precision)

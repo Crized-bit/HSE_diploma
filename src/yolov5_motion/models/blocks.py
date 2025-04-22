@@ -1,5 +1,4 @@
-# Zero Convolution module for ControlNet. Approved
-
+import peft
 import torch.nn as nn
 import torch
 
@@ -71,8 +70,8 @@ class ControlNetModel(nn.Module):
                 ),
             ]
         )
-        
         self.start_conv = ResConv(3, 3)
+
     def forward(self, intial_img, x):
         x = self.start_conv(x)
         x = x + intial_img
@@ -116,33 +115,185 @@ class ControlNetModel(nn.Module):
         ####################
         return (conv_17_out, conv_18_out, conv_19_out, conv_20_out, conv_22_out, conv_23_out)
 
+    def train(self, mode: bool = True):
+        for param in self.parameters():
+            param.requires_grad = True
+        return super().train(mode)
+
+
+class ControlNetModelLora(nn.Module):
+    def __init__(self, yolo_model: YOLOv5Model):
+        super().__init__()
+        # Clone YOLOv5 backbone structure
+        self.nodes = nn.ModuleList(
+            [
+                Conv(c1=3, c2=48, k=6, s=2, p=2),
+                Conv(c1=48, c2=96, k=3, s=2, p=1),
+                C3(c1=96, c2=96, n=2),
+                Conv(c1=96, c2=192, k=3, s=2, p=1),
+                C3(c1=192, c2=192, n=4),
+                Conv(c1=192, c2=384, k=3, s=2, p=1),
+                C3(c1=384, c2=384, n=6),
+                Conv(c1=384, c2=768, k=3, s=2, p=1),
+                C3(c1=768, c2=768, n=2),
+                SPPF(c1=768, c2=768),
+            ]
+        )
+
+        nodes = nn.ModuleList([module for module in yolo_model.model[:10]])
+
+        for my_node, yolo_node in zip(self.nodes, nodes):
+            share_weights_recursive(yolo_node, my_node)
+
+        config = peft.LoraConfig(
+            r=32,
+            lora_alpha=16,
+            target_modules=["conv"],
+            bias="none",
+        )
+        self.nodes = peft.get_peft_model(self.nodes, config)
+        # Convs for ControlNet
+        self.convs = nn.ModuleList(
+            [
+                nn.Sequential(ResConv(192, 192)),
+                nn.Sequential(nn.MaxPool2d(kernel_size=2, stride=2), ResConv(192, 192)),
+                nn.Sequential(ResConv(384, 384)),
+                nn.Sequential(ResConv(384, 384)),
+                nn.Sequential(
+                    nn.Tanh(),
+                ),
+                nn.Sequential(
+                    nn.Tanh(),
+                ),
+            ]
+        )
+
+        self.start_conv = ResConv(3, 3)
+
+    def forward(self, intial_img, x):
+        x = self.start_conv(x)
+        x = x + intial_img
+        # Convs
+        x = self.nodes.base_model.model[0](x)
+        x = self.nodes.base_model.model[1](x)
+        # C3 + Res Con
+        x = self.nodes.base_model.model[2](x)
+        # Conv
+        x = self.nodes.base_model.model[3](x)
+
+        ####### 17 out #####
+        conv_17_out = x + self.convs[0](x)
+        ####################
+
+        # C3
+        x = self.nodes.base_model.model[4](x)
+        #####################
+
+        ####### 18 out #####
+        conv_18_out = self.convs[1](x)
+        ####################
+
+        # Conv
+        x = self.nodes.base_model.model[5](x)
+
+        ####### 19 out #####
+        conv_19_out = x + self.convs[2](x)
+        ####################
+
+        x = self.nodes.base_model.model[6](x)
+
+        ####### 20 out #####
+        conv_20_out = x + self.convs[3](x)
+        ####################
+
+        x = self.nodes.base_model.model[7](x)
+
+        x = self.nodes.base_model.model[8](x)
+        ####### 22 out #####
+        conv_22_out = self.convs[4](x)
+        ####################
+
+        x = self.nodes.base_model.model[9](x)
+
+        ####### 23 out #####
+        conv_23_out = self.convs[5](x)
+        ####################
+        return (conv_17_out, conv_18_out, conv_19_out, conv_20_out, conv_22_out, conv_23_out)
+
+    def train(self, mode: bool = True):
+        for name, param in self.named_parameters():
+            if "lora" in name:
+                param.requires_grad = True
+        for param in self.convs.parameters():
+            param.requires_grad = True
+        
+        for param in self.start_conv.parameters():
+            param.requires_grad = True
+
+        self.nodes.eval()
+        self.convs.train(mode)
+        self.start_conv.train(mode)
+
 
 def test_control_net():
     print("Testing ControlNet with YOLOv5...")
 
     # Load YOLOv5 model
-    try:
-        yolo_model = YOLOv5Model("/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml")
-        print("YOLOv5 model loaded successfully")
+    yolo_model = YOLOv5Model("/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml")
+    print("YOLOv5 model loaded successfully")
 
-        # Test input
-        test_input = torch.randn(1, 3, 640, 640)
+    # Test input
+    test_input = torch.randn(1, 3, 640, 640)
 
-        # Create ControlNetModel
-        control_net = ControlNetModel(yolo_model)
-        print("ControlNetModel created successfully")
+    # Create ControlNetModel
+    control_net = ControlNetModelLora(yolo_model)
+    control_net.train()
+    for name, param in control_net.named_parameters():
+        if param.requires_grad:
+            print(name)
+    print("ControlNetModel created successfully")
 
-        # Test forward pass
-        # with torch.no_grad():
-        outputs = control_net(test_input)
-        loss = sum(output.sum() for output in outputs)
-        loss.backward()
+    # Test forward pass
+    # with torch.no_grad():
+    outputs = control_net(test_input, test_input)
+    loss = sum(output.sum() for output in outputs)
+    loss.backward()
 
-        print(f"ControlNet output shape: {[output.shape for output in outputs]}")
-        print("ControlNet test complete.")
+    print(f"ControlNet output shape: {[output.shape for output in outputs]}")
+    print("ControlNet test complete.")
 
-    except Exception as e:
-        print(f"Error in ControlNet test: {e}")
+
+def share_weights_recursive(source_module, target_module, prefix=""):
+    """
+    Recursively share weights between corresponding modules of any depth.
+
+    Args:
+        source_module: The module to copy weights from
+        target_module: The module to share weights with
+        prefix: Parameter name prefix for nested modules (used internally)
+    """
+    # Ensure modules are compatible
+    if type(source_module) != type(target_module):
+        print(f"Warning: Module types don't match at {prefix}: {type(source_module)} vs {type(target_module)}")
+        return
+
+    # Share parameters at current level
+    for name, param in source_module._parameters.items():
+        if param is not None:
+            if name in target_module._parameters:
+                target_module._parameters[name] = param
+
+    # Share buffers (for BatchNorm running stats, etc.)
+    for name, buf in source_module._buffers.items():
+        if buf is not None:
+            if name in target_module._buffers:
+                target_module._buffers[name] = buf
+
+    # Recursively share for all child modules
+    for name, module in source_module._modules.items():
+        if name in target_module._modules:
+            new_prefix = f"{prefix}.{name}" if prefix else name
+            share_weights_recursive(module, target_module._modules[name], new_prefix)
 
 
 if __name__ == "__main__":

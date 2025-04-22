@@ -393,7 +393,7 @@ def test():
 
     # Сохраняем результаты тестирования в файл
     with open(output_dir / "test_results.json", "w") as f:
-        json.dump({"metrics": test_metrics, "config": asdict(my_config)}, f, indent=4)
+        json.dump({"metrics": test_metrics}, f, indent=4)
 
     print(f"\nTest results saved to {output_dir}")
 
