@@ -134,8 +134,7 @@ def draw_bounding_boxes(image, annotations, color=(0, 255, 0), thickness=2):
     """
     img_with_boxes = image.copy()
     h, w = image.shape[:2]
-    for ann in annotations:
-        bbox = ann["bbox"]
+    for bbox in annotations:
         # Convert from center format to corner format
         x1, y1, x2, y2 = cxcywh_to_xyxy(bbox)
 
@@ -144,29 +143,5 @@ def draw_bounding_boxes(image, annotations, color=(0, 255, 0), thickness=2):
 
         # Draw bounding box
         cv2.rectangle(img_with_boxes, (x1, y1), (x2, y2), color, thickness)
-
-        # If available, draw label
-        if "labels" in ann and ann["labels"]:  # Check if labels exist and are not empty
-            label_text = ""
-
-            # Handle different label formats
-            if isinstance(ann["labels"], list) and len(ann["labels"]) > 0:
-                label_item = ann["labels"][0]
-
-                if isinstance(label_item, dict):
-                    # Try different possible keys for label name
-                    if "name" in label_item:
-                        label_text = label_item["name"]
-                    elif "id" in label_item:
-                        label_text = f"Class {label_item['id']}"
-                    elif "class" in label_item:
-                        label_text = str(label_item["class"])
-                elif isinstance(label_item, (str, int, float)):
-                    # If the label is a simple value
-                    label_text = str(label_item)
-
-            # Only draw label if we have valid text
-            if label_text:
-                cv2.putText(img_with_boxes, label_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, thickness)
 
     return img_with_boxes

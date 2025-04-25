@@ -83,32 +83,16 @@ class PreprocessedVideoDataset(Dataset):
 
     def _adjust_bbox(self, bbox, original_size):
         """
-        Adjust bounding box coordinates for padded image and ensure it stays within
-        the actual image area (not in padding).
-
-        Args:
-            bbox: Original bounding box [center_x, center_y, width, height]
-            original_size: Original image size (width, height)
-            padded_size: Padded image size (width, height)
-
-        Returns:
-            Normalized bounding box [center_x, center_y, width, height] or None if
-            the box would have zero area after clipping
+        Normalize bbox
         """
         orig_w, orig_h = original_size
 
-        scale = min(my_config.model.img_size / orig_w, my_config.model.img_size / orig_h)
-
-        # Calculate new size after scaling
-        new_w = int(orig_w * scale)
-        new_h = int(orig_h * scale)
-
         # Unpack and scale bbox
         center_x, center_y, width, height = bbox
-        center_x = center_x * scale / new_w
-        center_y = center_y * scale / new_h
-        width = width * scale / new_w
-        height = height * scale / new_h
+        center_x = center_x / orig_w
+        center_y = center_y / orig_h
+        width = width / orig_w
+        height = height / orig_h
 
         return [center_x, center_y, width, height]
 
@@ -257,7 +241,6 @@ class PreprocessedVideoDataset(Dataset):
         # Extract bboxes for augmentation
         bboxes = []
         for ann in sample["annotations"]:
-            # Convert from center format to COCO format (xmin, ymin, width, height)
             x, y, w, h = ann["bbox"]
             bboxes.append([x, y, w, h])
 
@@ -273,8 +256,7 @@ class PreprocessedVideoDataset(Dataset):
             # Update annotations with augmented bboxes
             for i, bbox in enumerate(augmented["bboxes"]):
                 x, y, w, h = bbox
-                # Convert back to center format
-                sample["annotations"][i]["bbox"] = [x, y, w, h]
+                bboxes[i] = [x, y, w, h]
 
         # Create target image with padding color
         current_frame_padded = np.ones((my_config.model.img_size, my_config.model.img_size, 3), dtype=np.uint8) * np.array(
@@ -290,11 +272,11 @@ class PreprocessedVideoDataset(Dataset):
 
         # Place resized image on target image
         current_frame_padded[pad_h : pad_h + current_frame.shape[0], pad_w : pad_w + current_frame.shape[1]] = current_frame
-        control_image_padded[pad_h : pad_h + current_frame.shape[0], pad_w : pad_w + current_frame.shape[1]] = control_image
+        control_image_padded[pad_h : pad_h + control_image.shape[0], pad_w : pad_w + control_image.shape[1]] = control_image
 
-        idx_to_drop = []
-        for i, my_dick in enumerate(sample["annotations"]):
-            x, y, w, h = my_dick["bbox"]
+        final_boxes = []
+        for i, box in enumerate(bboxes):
+            x, y, w, h = box
 
             initial_space = w * h
 
@@ -312,7 +294,6 @@ class PreprocessedVideoDataset(Dataset):
             ratio = result_space / initial_space
 
             if ratio <= my_config.data.bbox_skip_percentage:
-                idx_to_drop.append(i)
                 continue
 
             x = (x * current_frame.shape[1] + pad_w) / my_config.model.img_size
@@ -320,7 +301,7 @@ class PreprocessedVideoDataset(Dataset):
             w = w * current_frame.shape[1] / my_config.model.img_size
             h = h * current_frame.shape[0] / my_config.model.img_size
             # Convert back to center format
-            sample["annotations"][i]["bbox"] = [x, y, w, h]
+            final_boxes.append([x, y, w, h])
 
         # Convert frames to torch tensors (C, H, W format)
         current_frame_tensor = torch.from_numpy(current_frame_padded).permute(2, 0, 1).float() / 255.0
@@ -329,7 +310,7 @@ class PreprocessedVideoDataset(Dataset):
         return {
             "current_frame": current_frame_tensor,
             "control_image": control_tensor,
-            "annotations": [x for idx, x in enumerate(sample["annotations"]) if idx not in idx_to_drop],
+            "annotations": final_boxes,
         }
 
 

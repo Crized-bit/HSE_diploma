@@ -218,11 +218,7 @@ def test():
     datasets = create_dataset_splits(
         preprocessed_dir=my_config.data.preprocessed_dir,
         annotations_dir=my_config.data.annotations_dir,
-        splits_file=my_config.data.splits_file,
-        val_ratio=my_config.training.val_ratio,
         augment=False,  # Без аугментации для тестирования
-        control_stack_length=my_config.data.control_stack_length,
-        prev_frame_time_diff=my_config.data.prev_frame_time_diff,
     )
 
     test_dataloader = DataLoader(

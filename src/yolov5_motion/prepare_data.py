@@ -9,7 +9,7 @@ from yolov5_motion.data.utils import draw_bounding_boxes
 import cv2
 import numpy as np
 
-NUM_SAMPLES = 10
+NUM_SAMPLES = 100
 OUTPUT_DIR = "/home/jovyan/p.kudrevatyh/bg_subtraction"
 CONTROL_MODE = "bg_subtraction"
 
@@ -32,12 +32,7 @@ def main():
     datasets = create_dataset_splits(
         preprocessed_dir=OUTPUT_DIR,
         annotations_dir=my_config.data.annotations_dir,
-        splits_file=my_config.data.splits_file,
         augment=my_config.training.augment,
-        augment_prob=my_config.training.augment_prob,
-        val_ratio=my_config.training.val_ratio,
-        control_stack_length=my_config.data.control_stack_length,
-        prev_frame_time_diff=my_config.data.prev_frame_time_diff,
     )
 
     # Step 3: Create dataloaders

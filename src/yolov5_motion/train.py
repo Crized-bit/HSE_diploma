@@ -121,12 +121,7 @@ class Trainer:
         self.datasets = create_dataset_splits(
             preprocessed_dir=my_config.data.preprocessed_dir,
             annotations_dir=my_config.data.annotations_dir,
-            splits_file=my_config.data.splits_file,
-            val_ratio=my_config.training.val_ratio,
             augment=my_config.training.augment,  # Enable augmentation
-            augment_prob=my_config.training.augment_prob,
-            control_stack_length=my_config.data.control_stack_length,
-            prev_frame_time_diff=my_config.data.prev_frame_time_diff,
         )
 
         self.dataloaders = get_dataloaders(
@@ -277,8 +272,7 @@ class Trainer:
         for batch_idx, annotations in enumerate(targets):
             for ann in annotations:
                 # Extract bounding box
-                bbox = torch.tensor(ann["bbox"], dtype=torch.float32)
-                # Normalize coordinates to [0,1]
+                bbox = torch.tensor(ann, dtype=torch.float32)
                 class_idx = 0
 
                 # Create target row [batch_idx, class_idx, x, y, w, h, ignore_flag]
@@ -425,9 +419,8 @@ class Trainer:
                     # Process ground truth
                     true_boxes = []
                     if i < len(targets):
-                        for ann in targets[i]:
+                        for bbox in targets[i]:
                             # Convert from center format to corner format
-                            bbox = ann["bbox"]
                             x1 = (bbox[0] - bbox[2] / 2) * my_config.model.img_size
                             y1 = (bbox[1] - bbox[3] / 2) * my_config.model.img_size
                             x2 = (bbox[0] + bbox[2] / 2) * my_config.model.img_size
