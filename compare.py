@@ -6,7 +6,7 @@ import numpy as np
 BASE_PATH = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs"
 
 MODEL_NAMES = [
-    "yolov5m/base_model",
+    "yolov5s/base_model",
     "yolov5n/base_model",
     "yolov5n/0.2/bg_sub/control_lora",
 ]

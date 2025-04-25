@@ -360,41 +360,40 @@ class GradientTracker:
 if __name__ == "__main__":
 
     # Create model with pretrained weights
-    weights = "/home/jovyan/p.kudrevatyh/yolov5m.pt"
+    weights = "/home/jovyan/p.kudrevatyh/yolov5s.pt"
     model = create_combined_model(
         yolo_weights=weights,  # Load pretrained YOLOv5 weights
         controlnet_weights=None,  # Initialize ControlNet from model encoder
-        cfg="/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml",  # Use YOLOv5m configuration
+        cfg="/home/jovyan/p.kudrevatyh/yolov5/models/yolov5s.yaml",  # Use YOLOv5m configuration
         img_size=640,
         nc=80,
     )
-
     # print(model)
     # Example of saving and loading just the ControlNet portion
     # After training
-    # checkpoint = {
-    #     "epoch": 0,
-    #     "model_state_dict": model.state_dict(),
-    #     "optimizer_state_dict": None,
-    #     "global_step": None,
-    #     "best_val_loss": None,
-    # }
+    checkpoint = {
+        "epoch": 0,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": None,
+        "global_step": None,
+        "best_val_loss": None,
+    }
 
     # # Save regular checkpoint
-    # checkpoint_path = Path("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/lora/checkpoints") / f"best_model.pt"
-    # torch.save(checkpoint, checkpoint_path)
+    checkpoint_path = Path("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/yolov5s/base_model/checkpoints") / f"best_model.pt"
+    torch.save(checkpoint, checkpoint_path)
     # model.save_lora("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/lora/checkpoints/lora.pt")
 
     # Example inputs (batch size 1, RGB images)
-    input_img = torch.randn(1, 3, 640, 640)
-    condition_img = torch.randn(1, 3, 640, 640)
+    # input_img = torch.randn(1, 3, 640, 640)
+    # condition_img = torch.randn(1, 3, 640, 640)
 
-    # Run inference
-    # with torch.no_grad():
-    outputs = model(input_img, condition_img)
-    # make_dot(tuple(outputs), params=dict(list(model.named_parameters()))).render("rnn_torchviz", format="png")
-    print(f"Output shape: {[output.shape for output in outputs]}")
+    # # Run inference
+    # # with torch.no_grad():
+    # outputs = model(input_img, condition_img)
+    # # make_dot(tuple(outputs), params=dict(list(model.named_parameters()))).render("rnn_torchviz", format="png")
+    # print(f"Output shape: {[output.shape for output in outputs]}")
 
-    # Training example
-    print("Training only ControlNet parameters")
-    model.train_controlnet()  # Train only ControlNet
+    # # Training example
+    # print("Training only ControlNet parameters")
+    # model.train_controlnet()  # Train only ControlNet

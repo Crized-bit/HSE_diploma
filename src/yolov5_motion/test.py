@@ -335,7 +335,7 @@ def test():
                 if i < len(targets):
                     for ann in targets[i]:
                         # Конвертируем из формата center в формат corner
-                        bbox = ann["bbox"]
+                        bbox = ann
                         x1 = (bbox[0] - bbox[2] / 2) * my_config.model.img_size
                         y1 = (bbox[1] - bbox[3] / 2) * my_config.model.img_size
                         x2 = (bbox[0] + bbox[2] / 2) * my_config.model.img_size
