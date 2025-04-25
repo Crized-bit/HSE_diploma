@@ -1,5 +1,4 @@
 import json
-import numpy as np
 import cv2
 from decord import VideoReader, cpu
 from pathlib import Path
@@ -7,29 +6,21 @@ import shutil
 import concurrent.futures
 from tqdm import tqdm
 from yolov5_motion.data.utils import create_control_image
-
+from yolov5_motion.config import my_config
 
 def preprocess_videos(
     videos_dir,
     annotations_dir,
     output_dir,
-    resize_to=(640, 640),
-    pad_color=(114, 114, 114),
-    num_workers=8,
-    prev_frame_time_diff=1.0,
     control_mode: str = "flow",
-    control_stack_length: int = 15,
 ):
     """
     Preprocess videos by extracting frames and computing control images, saving them as individual images.
 
     Args:
-        videos_dir: Directory containing video files
         annotations_dir: Directory containing annotation files
         output_dir: Directory to save extracted frames
-        resize_to: Target size (width, height) for resizing
         pad_color: Padding color (RGB)
-        num_workers: Number of workers for parallel processing
         prev_frame_time_diff: Time difference in seconds between frames for motion computation
     """
     output_path = Path(output_dir)
@@ -130,7 +121,7 @@ def preprocess_videos(
         )
 
     # Define a function to process an entire video
-    def process_video(video_item, control_stack_length=15):
+    def process_video(video_item):
         video_id = video_item["video_id"]
         video_path = video_item["video_path"]
         frames_to_extract = video_item["frames"]
@@ -138,7 +129,7 @@ def preprocess_videos(
 
         try:
             print(f"Processing video {video_id} with {len(frames_to_extract)} frames...")
-            print(f"Using {control_stack_length} control frames for each target frame")
+            print(f"Using {my_config.data.control_stack_length} control frames for each target frame")
 
             # Create output directories for this video
             video_output_dir = frames_path / video_id
@@ -156,10 +147,10 @@ def preprocess_videos(
                 frame_time = frame_idx / fps
                 control_frames = set()
 
-                for i in range(control_stack_length):
+                for i in range(my_config.data.control_stack_length):
                     # Calculate time for each control frame going back in time
                     # The total time span will be prev_frame_time_diff * n_control_frames
-                    control_time_diff = prev_frame_time_diff * (i + 1)
+                    control_time_diff = my_config.data.prev_frame_time_diff * (i + 1)
                     control_frame_time = max(0, frame_time - control_time_diff)
                     control_frame_idx = max(0, int(control_frame_time * fps))
                     control_frames.add(control_frame_idx)
@@ -205,7 +196,7 @@ def preprocess_videos(
 
                 # Resize and prepare the target frame
                 h, w = frame.shape[:2]
-                target_w, target_h = resize_to
+                target_w, target_h = my_config.model.img_size, my_config.model.img_size
 
                 # Calculate scaling factor to maintain aspect ratio
                 scale = min(target_w / w, target_h / h)
@@ -217,19 +208,9 @@ def preprocess_videos(
                 # Resize target frame
                 resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-                # Create target image with padding color
-                target_image = np.ones((target_h, target_w, 3), dtype=np.uint8) * np.array(pad_color, dtype=np.uint8)
-
-                # Calculate padding
-                pad_w = (target_w - new_w) // 2
-                pad_h = (target_h - new_h) // 2
-
-                # Place resized image on target image
-                target_image[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = resized
-
                 # Save frame as JPEG
                 frame_output_path = video_output_dir / f"frame_{frame_idx:06d}.jpg"
-                cv2.imwrite(str(frame_output_path), cv2.cvtColor(target_image, cv2.COLOR_RGB2BGR))
+                cv2.imwrite(str(frame_output_path), cv2.cvtColor(resized, cv2.COLOR_RGB2BGR))
 
                 # Process each control frame
                 preprocessed_control_frames = []
@@ -246,13 +227,9 @@ def preprocess_videos(
                 # Generate and save control image
                 control_image = create_control_image(preprocessed_control_frames, resized, control_mode)
 
-                # Create control image with padding
-                target_control = np.ones((target_h, target_w, 3), dtype=np.uint8) * np.array(pad_color, dtype=np.uint8)
-                target_control[pad_h : pad_h + new_h, pad_w : pad_w + new_w] = control_image
-                
                 # Save with index to differentiate between multiple control frames
                 control_output_path = control_output_dir / f"control_{frame_idx:06d}.jpg"
-                cv2.imwrite(str(control_output_path), cv2.cvtColor(target_control, cv2.COLOR_RGB2BGR))
+                cv2.imwrite(str(control_output_path), cv2.cvtColor(control_image, cv2.COLOR_RGB2BGR))
 
             # Clear memory
             del frames_dict
@@ -270,11 +247,13 @@ def preprocess_videos(
             return video_id, 0
 
     # Process videos in parallel
-    print(f"Processing {len(videos_to_process)} videos with {num_workers} parallel workers...")
+    print(f"Processing {len(videos_to_process)} videos with {my_config.training.workers} parallel workers...")
     results = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
-        future_to_video = {executor.submit(process_video, video_item, control_stack_length): video_item["video_id"] for video_item in videos_to_process}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=my_config.training.workers) as executor:
+        future_to_video = {
+            executor.submit(process_video, video_item): video_item["video_id"] for video_item in videos_to_process
+        }
 
         for future in tqdm(concurrent.futures.as_completed(future_to_video), total=len(videos_to_process), desc="Processing videos"):
             video_id = future_to_video[future]
@@ -291,7 +270,7 @@ def preprocess_videos(
 
     # Create a mapping of frame to previous frame for control images
     print("Creating metadata...")
-    metadata = {"num_frames": total_processed, "frame_size": resize_to, "prev_frame_time_diff": prev_frame_time_diff, "videos": {}}
+    metadata = {"num_frames": total_processed, "prev_frame_time_diff": my_config.data.prev_frame_time_diff, "videos": {}}
 
     # Pre-process annotation files to create mappings for faster lookup
     video_fps_mapping = {}
@@ -308,7 +287,7 @@ def preprocess_videos(
             metadata["videos"][video_id] = {
                 "frames": sorted(list(video_info["frames"])),
                 "annotation_frames": sorted(list(frames_with_annotations.get(video_id, set()))),
-                "resolution": video_resolutions.get(video_id, (0, 0))
+                "resolution": video_resolutions.get(video_id, (0, 0)),
             }
 
     # Save metadata to output directory

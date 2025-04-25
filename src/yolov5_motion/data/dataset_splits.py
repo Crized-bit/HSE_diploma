@@ -1,4 +1,3 @@
-from calendar import c
 import json
 import random
 import torch
@@ -128,13 +127,27 @@ def get_dataloaders(datasets, batch_size=8, num_workers=4):
 
     # Create train dataloader with shuffling
     dataloaders["train"] = DataLoader(
-        datasets["train"], batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn, pin_memory=True
+        datasets["train"],
+        batch_size=batch_size,
+        persistent_workers = True,
+        shuffle=True,
+        num_workers=num_workers,
+        collate_fn=collate_fn,
+        pin_memory=True,
+        prefetch_factor=2,
     )
 
     # Create validation and test dataloaders without shuffling
     for split in ["val", "test"]:
         dataloaders[split] = DataLoader(
-            datasets[split], batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=collate_fn, pin_memory=True
+            datasets[split],
+            batch_size=batch_size,
+            persistent_workers = True,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=collate_fn,
+            pin_memory=True,
+            prefetch_factor=2,
         )
 
     return dataloaders

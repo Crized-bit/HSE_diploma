@@ -32,7 +32,6 @@ from yolov5_motion.config import my_config, EnhancedJSONEncoder
 from yolov5_motion.data.dataset import collate_fn
 
 
-
 class Trainer:
     def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -273,7 +272,6 @@ class Trainer:
         """
         # Initialize list to hold all target rows
         all_targets = []
-        img_size = my_config.model.img_size
 
         # Process each batch item
         for batch_idx, annotations in enumerate(targets):
@@ -281,17 +279,10 @@ class Trainer:
                 # Extract bounding box
                 bbox = torch.tensor(ann["bbox"], dtype=torch.float32)
                 # Normalize coordinates to [0,1]
-                normalized_bbox = torch.zeros_like(bbox)
-                normalized_bbox[0] = bbox[0] / img_size  # normalize center_x
-                normalized_bbox[1] = bbox[1] / img_size  # normalize center_y
-                normalized_bbox[2] = bbox[2] / img_size  # normalize width
-                normalized_bbox[3] = bbox[3] / img_size  # normalize height
-
-                # Для модели с единственным классом (человек), используем class_idx = 0
                 class_idx = 0
 
                 # Create target row [batch_idx, class_idx, x, y, w, h, ignore_flag]
-                target_row = torch.tensor([batch_idx, class_idx, *normalized_bbox], dtype=torch.float32)
+                target_row = torch.tensor([batch_idx, class_idx, *bbox], dtype=torch.float32)
                 all_targets.append(target_row)
 
         # Combine all target rows
@@ -423,9 +414,6 @@ class Trainer:
                 for i, det in enumerate(detections):
                     pred_boxes = []
                     if det is not None and len(det):
-                        # Rescale boxes to original image size
-                        det[:, :4] = scale_boxes(current_frames.shape[2:], det[:, :4], (640, 640)).round()
-
                         # Convert to list format expected by metrics functions
                         for *xyxy, conf, cls_id in det:
                             if cls_id == 0:
@@ -439,10 +427,10 @@ class Trainer:
                         for ann in targets[i]:
                             # Convert from center format to corner format
                             bbox = ann["bbox"]
-                            x1 = bbox[0] - bbox[2] / 2
-                            y1 = bbox[1] - bbox[3] / 2
-                            x2 = bbox[0] + bbox[2] / 2
-                            y2 = bbox[1] + bbox[3] / 2
+                            x1 = (bbox[0] - bbox[2] / 2) * my_config.model.img_size
+                            y1 = (bbox[1] - bbox[3] / 2) * my_config.model.img_size
+                            x2 = (bbox[0] + bbox[2] / 2) * my_config.model.img_size
+                            y2 = (bbox[1] + bbox[3] / 2) * my_config.model.img_size
 
                             # Get class ID (assumes single class in this case)
                             cls_id = 0  # Default to first class
@@ -452,7 +440,10 @@ class Trainer:
                     # Calculate precision and recall for this image
                     if len(true_boxes) > 0 or len(pred_boxes) > 0:
                         precision, recall, f1 = calculate_precision_recall(
-                            pred_boxes, true_boxes, iou_threshold=my_config.training.detection.iou_thres, conf_threshold=my_config.training.detection.conf_thres
+                            pred_boxes,
+                            true_boxes,
+                            iou_threshold=my_config.training.detection.iou_thres,
+                            conf_threshold=my_config.training.detection.conf_thres,
                         )
 
                         precisions.append(precision)
@@ -544,110 +535,83 @@ class Trainer:
             # Get predictions
             predictions = self.model(current_frames[:n_samples], control_images[:n_samples])
 
-            # Process predictions using YOLOv5's non_max_suppression if available
-            try:
-                # Apply non-max suppression to get detections
-                detections = non_max_suppression(
-                    predictions,
-                    conf_thres=my_config.training.detection.conf_thres,
-                    iou_thres=my_config.training.detection.iou_thres,
-                    max_det=my_config.training.detection.max_det,
-                )
+            # Apply non-max suppression to get detections
+            detections = non_max_suppression(
+                predictions,
+                conf_thres=my_config.training.detection.conf_thres,
+                iou_thres=my_config.training.detection.iou_thres,
+                max_det=my_config.training.detection.max_det,
+            )
 
-                # Now create visualizations with both ground truth and predictions
+            # Now create visualizations with both ground truth and predictions
+            for i in range(n_samples):
+                # Convert tensors to numpy arrays
+                frame = current_frames[i].cpu().permute(1, 2, 0).numpy() * 255
+                frame = frame.astype(np.uint8)
+
+                control = control_images[i].cpu().permute(1, 2, 0).numpy() * 255
+                control = control.astype(np.uint8)
+
+                # Draw ground truth annotations in green
+                gt_frame = frame.copy()
+                if i < len(annotations):
+                    from yolov5_motion.data.utils import draw_bounding_boxes
+
+                    gt_frame = draw_bounding_boxes(gt_frame, annotations[i], color=(0, 255, 0))
+
+                # Draw predicted bounding boxes in red
+                pred_frame = frame.copy()
+                if i < len(detections) and detections[i] is not None:
+                    # Scale coordinates to image size
+                    det = detections[i].clone()
+                    det[:, :4] = scale_boxes(current_frames.shape[2:], det[:, :4], pred_frame.shape).round()
+
+                    # Draw each detection
+                    for *xyxy, conf, cls in det:
+                        # Convert to integers
+                        xyxy = [int(x.item()) for x in xyxy]
+
+                        # Draw bounding box
+                        cv2.rectangle(pred_frame, (xyxy[0], xyxy[1]), (xyxy[2], xyxy[3]), (0, 0, 255), 2)
+
+                        # Add label with confidence
+                        label = f"{int(cls.item())}: {conf:.2f}"
+                        cv2.putText(pred_frame, label, (xyxy[0], xyxy[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+                # Create a side-by-side comparison: GT, Predictions, Control Image
+                comparison = np.hstack((gt_frame, pred_frame, control))
+
+                # Save the visualization
+                cv2.imwrite(str(self.viz_dir / f"val_epoch{epoch}_sample{i}.jpg"), cv2.cvtColor(comparison, cv2.COLOR_RGB2BGR))
+
+            # Create a panel of all samples
+            if n_samples > 0:
+                # Load saved images
+                panel_images = []
                 for i in range(n_samples):
-                    # Convert tensors to numpy arrays
-                    frame = current_frames[i].cpu().permute(1, 2, 0).numpy() * 255
-                    frame = frame.astype(np.uint8)
+                    img_path = self.viz_dir / f"val_epoch{epoch}_sample{i}.jpg"
+                    if img_path.exists():
+                        img = cv2.imread(str(img_path))
+                        if img is not None:
+                            panel_images.append(img)
 
-                    control = control_images[i].cpu().permute(1, 2, 0).numpy() * 255
-                    control = control.astype(np.uint8)
+                # Create panel if images are available
+                if panel_images:
+                    max_width = max(img.shape[1] for img in panel_images)
+                    # Create vertical stack with padding to same width
+                    panel = []
+                    for img in panel_images:
+                        if img.shape[1] < max_width:
+                            pad_width = max_width - img.shape[1]
+                            pad = np.ones((img.shape[0], pad_width, 3), dtype=np.uint8) * 255
+                            padded_img = np.hstack((img, pad))
+                            panel.append(padded_img)
+                        else:
+                            panel.append(img)
 
-                    # Draw ground truth annotations in green
-                    gt_frame = frame.copy()
-                    if i < len(annotations):
-                        from yolov5_motion.data.utils import draw_bounding_boxes
-
-                        gt_frame = draw_bounding_boxes(gt_frame, annotations[i], color=(0, 255, 0))
-
-                    # Draw predicted bounding boxes in red
-                    pred_frame = frame.copy()
-                    if i < len(detections) and detections[i] is not None:
-                        # Scale coordinates to image size
-                        det = detections[i].clone()
-                        det[:, :4] = scale_boxes(current_frames.shape[2:], det[:, :4], pred_frame.shape).round()
-
-                        # Draw each detection
-                        for *xyxy, conf, cls in det:
-                            # Convert to integers
-                            xyxy = [int(x.item()) for x in xyxy]
-
-                            # Draw bounding box
-                            cv2.rectangle(pred_frame, (xyxy[0], xyxy[1]), (xyxy[2], xyxy[3]), (0, 0, 255), 2)
-
-                            # Add label with confidence
-                            label = f"{int(cls.item())}: {conf:.2f}"
-                            cv2.putText(pred_frame, label, (xyxy[0], xyxy[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-
-                    # Create a side-by-side comparison: GT, Predictions, Control Image
-                    comparison = np.hstack((gt_frame, pred_frame, control))
-
-                    # Save the visualization
-                    cv2.imwrite(str(self.viz_dir / f"val_epoch{epoch}_sample{i}.jpg"), cv2.cvtColor(comparison, cv2.COLOR_RGB2BGR))
-
-                # Create a panel of all samples
-                if n_samples > 0:
-                    # Load saved images
-                    panel_images = []
-                    for i in range(n_samples):
-                        img_path = self.viz_dir / f"val_epoch{epoch}_sample{i}.jpg"
-                        if img_path.exists():
-                            img = cv2.imread(str(img_path))
-                            if img is not None:
-                                panel_images.append(img)
-
-                    # Create panel if images are available
-                    if panel_images:
-                        max_width = max(img.shape[1] for img in panel_images)
-                        # Create vertical stack with padding to same width
-                        panel = []
-                        for img in panel_images:
-                            if img.shape[1] < max_width:
-                                pad_width = max_width - img.shape[1]
-                                pad = np.ones((img.shape[0], pad_width, 3), dtype=np.uint8) * 255
-                                padded_img = np.hstack((img, pad))
-                                panel.append(padded_img)
-                            else:
-                                panel.append(img)
-
-                        if panel:
-                            panel = np.vstack(panel)
-                            cv2.imwrite(str(self.viz_dir / f"val_panel_epoch{epoch}.jpg"), panel)
-
-            except (NameError, Exception) as e:
-                print(f"Could not generate prediction visualizations: {e}")
-
-                # Fallback: just visualize ground truth and control images
-                for i in range(n_samples):
-                    # Convert tensors to numpy arrays
-                    frame = current_frames[i].cpu().permute(1, 2, 0).numpy() * 255
-                    frame = frame.astype(np.uint8)
-
-                    control = control_images[i].cpu().permute(1, 2, 0).numpy() * 255
-                    control = control.astype(np.uint8)
-
-                    # Draw ground truth annotations
-                    gt_frame = frame.copy()
-                    if i < len(annotations):
-                        from yolov5_motion.data.utils import draw_bounding_boxes
-
-                        gt_frame = draw_bounding_boxes(gt_frame, annotations[i])
-
-                    # Create a side-by-side comparison
-                    comparison = np.hstack((gt_frame, control))
-
-                    # Save the visualization
-                    cv2.imwrite(str(self.viz_dir / f"val_epoch{epoch}_sample{i}.jpg"), cv2.cvtColor(comparison, cv2.COLOR_RGB2BGR))
+                    if panel:
+                        panel = np.vstack(panel)
+                        cv2.imwrite(str(self.viz_dir / f"val_panel_epoch{epoch}.jpg"), panel)
 
     def plot_metrics(self):
         """Plot and save training metrics with enhanced visualizations"""

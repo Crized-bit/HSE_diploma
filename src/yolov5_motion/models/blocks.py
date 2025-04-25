@@ -125,22 +125,26 @@ class ControlNetModelLora(nn.Module):
     def __init__(self, yolo_model: YOLOv5Model):
         super().__init__()
         # Clone YOLOv5 backbone structure
-        self.nodes = nn.ModuleList(
-            [
-                Conv(c1=3, c2=48, k=6, s=2, p=2),
-                Conv(c1=48, c2=96, k=3, s=2, p=1),
-                C3(c1=96, c2=96, n=2),
-                Conv(c1=96, c2=192, k=3, s=2, p=1),
-                C3(c1=192, c2=192, n=4),
-                Conv(c1=192, c2=384, k=3, s=2, p=1),
-                C3(c1=384, c2=384, n=6),
-                Conv(c1=384, c2=768, k=3, s=2, p=1),
-                C3(c1=768, c2=768, n=2),
-                SPPF(c1=768, c2=768),
-            ]
-        )
 
         nodes = nn.ModuleList([module for module in yolo_model.model[:10]])
+
+        initial_num_ch = nodes[0].conv.out_channels
+        initial_nub_blocks = len(yolo_model.model[:10][2].m)
+
+        self.nodes = nn.ModuleList(
+            [
+                Conv(c1=3, c2=initial_num_ch, k=6, s=2, p=2),
+                Conv(c1=initial_num_ch, c2=initial_num_ch * 2, k=3, s=2, p=1),
+                C3(c1=initial_num_ch * 2, c2=initial_num_ch * 2, n=initial_nub_blocks),
+                Conv(c1=initial_num_ch * 2, c2=initial_num_ch * 4, k=3, s=2, p=1),
+                C3(c1=initial_num_ch * 4, c2=initial_num_ch * 4, n=initial_nub_blocks * 2),
+                Conv(c1=initial_num_ch * 4, c2=initial_num_ch * 8, k=3, s=2, p=1),
+                C3(c1=initial_num_ch * 8, c2=initial_num_ch * 8, n=initial_nub_blocks * 3),
+                Conv(c1=initial_num_ch * 8, c2=initial_num_ch * 16, k=3, s=2, p=1),
+                C3(c1=initial_num_ch * 16, c2=initial_num_ch * 16, n=initial_nub_blocks),
+                SPPF(c1=initial_num_ch * 16, c2=initial_num_ch * 16),
+            ]
+        )
 
         for my_node, yolo_node in zip(self.nodes, nodes):
             share_weights_recursive(yolo_node, my_node)
@@ -155,10 +159,10 @@ class ControlNetModelLora(nn.Module):
         # Convs for ControlNet
         self.convs = nn.ModuleList(
             [
-                nn.Sequential(ResConv(192, 192)),
-                nn.Sequential(nn.MaxPool2d(kernel_size=2, stride=2), ResConv(192, 192)),
-                nn.Sequential(ResConv(384, 384)),
-                nn.Sequential(ResConv(384, 384)),
+                nn.Sequential(ResConv(initial_num_ch * 4, initial_num_ch * 4)),
+                nn.Sequential(nn.MaxPool2d(kernel_size=2, stride=2), ResConv(initial_num_ch * 4, initial_num_ch * 4)),
+                nn.Sequential(ResConv(initial_num_ch * 8, initial_num_ch * 8)),
+                nn.Sequential(ResConv(initial_num_ch * 8, initial_num_ch * 8)),
                 nn.Sequential(
                     nn.Tanh(),
                 ),
@@ -226,7 +230,7 @@ class ControlNetModelLora(nn.Module):
                 param.requires_grad = True
         for param in self.convs.parameters():
             param.requires_grad = True
-        
+
         for param in self.start_conv.parameters():
             param.requires_grad = True
 
@@ -236,10 +240,12 @@ class ControlNetModelLora(nn.Module):
 
 
 def test_control_net():
+    from yolov5_motion.config import my_config
+
     print("Testing ControlNet with YOLOv5...")
 
     # Load YOLOv5 model
-    yolo_model = YOLOv5Model("/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml")
+    yolo_model = YOLOv5Model(my_config.model.yolo_cfg)
     print("YOLOv5 model loaded successfully")
 
     # Test input

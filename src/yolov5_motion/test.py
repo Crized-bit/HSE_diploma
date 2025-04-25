@@ -328,9 +328,6 @@ def test():
             for i, det in enumerate(detections):
                 pred_boxes = []
                 if det is not None and len(det):
-                    # Масштабируем рамки к исходному размеру изображения
-                    det[:, :4] = scale_boxes(current_frames.shape[2:], det[:, :4], (640, 640)).round()
-
                     # Конвертируем в формат, ожидаемый функциями метрик
                     for *xyxy, conf, cls_id in det:
                         # We need to pred only people
@@ -343,10 +340,10 @@ def test():
                     for ann in targets[i]:
                         # Конвертируем из формата center в формат corner
                         bbox = ann["bbox"]
-                        x1 = bbox[0] - bbox[2] / 2
-                        y1 = bbox[1] - bbox[3] / 2
-                        x2 = bbox[0] + bbox[2] / 2
-                        y2 = bbox[1] + bbox[3] / 2
+                        x1 = (bbox[0] - bbox[2] / 2) * my_config.model.img_size
+                        y1 = (bbox[1] - bbox[3] / 2) * my_config.model.img_size
+                        x2 = (bbox[0] + bbox[2] / 2) * my_config.model.img_size
+                        y2 = (bbox[1] + bbox[3] / 2) * my_config.model.img_size
 
                         # Получаем ID класса (предполагаем один класс)
                         cls_id = 0  # По умолчанию первый класс
@@ -358,7 +355,7 @@ def test():
                     precision, recall, f1 = calculate_precision_recall(
                         pred_boxes,
                         true_boxes,
-                        iou_threshold=0.5,
+                        iou_threshold=my_config.training.detection.iou_thres,
                         conf_threshold=my_config.training.detection.conf_thres,
                     )
 

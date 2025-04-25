@@ -1,4 +1,5 @@
 import json
+import numpy as np
 import torch
 
 # import numpy as np
@@ -7,6 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 from typing import Dict, List, Any
 from pathlib import Path
 import albumentations as A
+from yolov5_motion.config import my_config
 
 
 class PreprocessedVideoDataset(Dataset):
@@ -45,7 +47,7 @@ class PreprocessedVideoDataset(Dataset):
                 [
                     # Spatial augmentations that apply to both image and control
                     A.HorizontalFlip(p=augment_prob),
-                    A.RandomResizedCrop(size=(640, 640), scale=(0.8, 1.0), p=augment_prob),
+                    A.RandomResizedCrop(size=(640, 640), scale=(0.6, 1.0), p=augment_prob),
                     A.Rotate(limit=15, p=augment_prob, fill=(114, 114, 114), fill_mask=(114, 114, 114)),
                     # Color augmentations only for the input image
                     A.OneOf(
@@ -65,7 +67,13 @@ class PreprocessedVideoDataset(Dataset):
                         p=augment_prob * 0.5,
                     ),  # Lower probability for these
                 ],
-                bbox_params=A.BboxParams(format="coco", label_fields=["class_labels"]),  # [x_min, y_min, width, height]
+                bbox_params=A.BboxParams(
+                    format="yolo",
+                    label_fields=["class_labels"],
+                    clip=True,
+                    filter_invalid_bboxes=True,
+                    min_visibility=my_config.data.bbox_skip_percentage,
+                ),
             )
         # Load metadata
         metadata_path = self.preprocessed_dir / "metadata.json"
@@ -83,7 +91,7 @@ class PreprocessedVideoDataset(Dataset):
         # Create a mapping of samples - each sample is a frame with annotations
         self.samples = self._create_samples()
 
-    def _adjust_bbox_for_padding(self, bbox, original_size, padded_size=(640, 640)):
+    def _adjust_bbox(self, bbox, original_size):
         """
         Adjust bounding box coordinates for padded image and ensure it stays within
         the actual image area (not in padding).
@@ -94,60 +102,25 @@ class PreprocessedVideoDataset(Dataset):
             padded_size: Padded image size (width, height)
 
         Returns:
-            Adjusted and clipped bounding box [center_x, center_y, width, height] or None if
+            Normalized bounding box [center_x, center_y, width, height] or None if
             the box would have zero area after clipping
         """
         orig_w, orig_h = original_size
-        pad_w, pad_h = padded_size
 
-        # Calculate scaling factor to maintain aspect ratio
-        scale = min(pad_w / orig_w, pad_h / orig_h)
+        scale = min(my_config.model.img_size / orig_w, my_config.model.img_size / orig_h)
 
         # Calculate new size after scaling
         new_w = int(orig_w * scale)
         new_h = int(orig_h * scale)
 
-        # Calculate padding
-        pad_left = (pad_w - new_w) // 2
-        pad_top = (pad_h - new_h) // 2
-
-        # Define valid image region boundaries
-        min_x = pad_left
-        min_y = pad_top
-        max_x = pad_left + new_w
-        max_y = pad_top + new_h
-
         # Unpack and scale bbox
         center_x, center_y, width, height = bbox
-        center_x = center_x * scale + pad_left
-        center_y = center_y * scale + pad_top
-        width = width * scale
-        height = height * scale
+        center_x = center_x * scale / new_w
+        center_y = center_y * scale / new_h
+        width = width * scale / new_w
+        height = height * scale / new_h
 
-        # Calculate box edges
-        left = center_x - width / 2
-        top = center_y - height / 2
-        right = center_x + width / 2
-        bottom = center_y + height / 2
-
-        # Clip the box to the valid region
-        new_left = max(left, min_x)
-        new_top = max(top, min_y)
-        new_right = min(right, max_x)
-        new_bottom = min(bottom, max_y)
-
-        # Check if the clipped box has valid dimensions
-        if new_right <= new_left or new_bottom <= new_top:
-            # Box is completely outside valid region or has zero area after clipping
-            return None
-
-        # Recalculate box parameters after clipping
-        new_width = new_right - new_left
-        new_height = new_bottom - new_top
-        new_center_x = new_left + new_width / 2
-        new_center_y = new_top + new_height / 2
-
-        return [new_center_x, new_center_y, new_width, new_height]
+        return [center_x, center_y, width, height]
 
     def _create_samples(self) -> List[Dict]:
         """
@@ -198,7 +171,11 @@ class PreprocessedVideoDataset(Dataset):
                         frames_to_skip.add(frame_idx)
                         continue
 
-                if entity["labels"].get("fully_occluded") == 1 or entity["labels"].get("reflection") == 1:
+                if (
+                    entity["labels"].get("fully_occluded") == 1
+                    or entity["labels"].get("reflection") == 1
+                    or entity["labels"].get("severly_occluded_person") == 1
+                ):
                     continue
 
                 # Get rid of frames w.o. normal control images
@@ -221,7 +198,7 @@ class PreprocessedVideoDataset(Dataset):
 
                 # Adjust bbox for padding if resolution is available
                 if resolution:
-                    bbox = self._adjust_bbox_for_padding(bbox, resolution)
+                    bbox = self._adjust_bbox(bbox, resolution)
                     if not bbox:
                         continue
 
@@ -289,38 +266,80 @@ class PreprocessedVideoDataset(Dataset):
 
         # Extract bboxes for augmentation
         bboxes = []
-        class_labels = []
         for ann in sample["annotations"]:
             # Convert from center format to COCO format (xmin, ymin, width, height)
-            cx, cy, w, h = ann["bbox"]
-            xmin = cx - w / 2
-            ymin = cy - h / 2
-            bboxes.append([xmin, ymin, w, h])
-            class_labels.append(0)  # Assuming single class for simplicity
+            x, y, w, h = ann["bbox"]
+            bboxes.append([x, y, w, h])
 
         # Apply augmentations if enabled
         if self.augment and bboxes:
-            augmented = self.aug_transform(image=current_frame, masks=[control_image], bboxes=bboxes, class_labels=class_labels)
+            augmented = self.aug_transform(
+                image=current_frame, masks=[control_image], bboxes=bboxes, class_labels=[0] * len(sample["annotations"])
+            )
 
             current_frame = augmented["image"]
             control_image = augmented["masks"][0]
 
             # Update annotations with augmented bboxes
             for i, bbox in enumerate(augmented["bboxes"]):
-                xmin, ymin, w, h = bbox
+                x, y, w, h = bbox
                 # Convert back to center format
-                cx = xmin + w / 2
-                cy = ymin + h / 2
-                sample["annotations"][i]["bbox"] = [cx, cy, w, h]
+                sample["annotations"][i]["bbox"] = [x, y, w, h]
+
+        # Create target image with padding color
+        current_frame_padded = np.ones((my_config.model.img_size, my_config.model.img_size, 3), dtype=np.uint8) * np.array(
+            114, dtype=np.uint8
+        )
+        control_image_padded = np.ones((my_config.model.img_size, my_config.model.img_size, 3), dtype=np.uint8) * np.array(
+            114, dtype=np.uint8
+        )
+
+        # Calculate padding
+        pad_w = (my_config.model.img_size - current_frame.shape[1]) // 2
+        pad_h = (my_config.model.img_size - current_frame.shape[0]) // 2
+
+        # Place resized image on target image
+        current_frame_padded[pad_h : pad_h + current_frame.shape[0], pad_w : pad_w + current_frame.shape[1]] = current_frame
+        control_image_padded[pad_h : pad_h + current_frame.shape[0], pad_w : pad_w + current_frame.shape[1]] = control_image
+
+        idx_to_drop = []
+        for i, my_dick in enumerate(sample["annotations"]):
+            x, y, w, h = my_dick["bbox"]
+
+            initial_space = w * h
+
+            top_left_x = max(x - w / 2, 0)
+            top_left_y = max(y - h / 2, 0)
+            bottom_right_x = min(x + w / 2, 1)
+            bottom_right_y = min(y + h / 2, 1)
+
+            x = (top_left_x + bottom_right_x) / 2
+            y = (top_left_y + bottom_right_y) / 2
+            w = bottom_right_x - top_left_x
+            h = bottom_right_y - top_left_y
+
+            result_space = w * h
+            ratio = result_space / initial_space
+
+            if ratio <= my_config.data.bbox_skip_percentage:
+                idx_to_drop.append(i)
+                continue
+
+            x = (x * current_frame.shape[1] + pad_w) / my_config.model.img_size
+            y = (y * current_frame.shape[0] + pad_h) / my_config.model.img_size
+            w = w * current_frame.shape[1] / my_config.model.img_size
+            h = h * current_frame.shape[0] / my_config.model.img_size
+            # Convert back to center format
+            sample["annotations"][i]["bbox"] = [x, y, w, h]
 
         # Convert frames to torch tensors (C, H, W format)
-        current_frame_tensor = torch.from_numpy(current_frame).permute(2, 0, 1).float() / 255.0
-        control_tensor = torch.from_numpy(control_image).permute(2, 0, 1).float() / 255.0
+        current_frame_tensor = torch.from_numpy(current_frame_padded).permute(2, 0, 1).float() / 255.0
+        control_tensor = torch.from_numpy(control_image_padded).permute(2, 0, 1).float() / 255.0
 
         return {
             "current_frame": current_frame_tensor,
             "control_image": control_tensor,
-            "annotations": sample["annotations"],
+            "annotations": [x for idx, x in enumerate(sample["annotations"]) if idx not in idx_to_drop],
         }
 
 
@@ -333,41 +352,3 @@ def collate_fn(batch):
     annotations = [item["annotations"] for item in batch]
 
     return {"current_frames": current_frames, "control_images": control_images, "annotations": annotations}
-
-
-def get_dataloader(
-    preprocessed_dir,
-    annotations_dir="./annotations",
-    batch_size=8,
-    shuffle=True,
-    num_workers=4,
-    prev_frame_time_diff=1.0,  # Time difference in seconds
-    augment=False,
-    augment_prob=0.5,
-):
-    """
-    Create a DataLoader for the preprocessed video dataset.
-
-    Args:
-        preprocessed_dir: Directory containing preprocessed frames
-        annotations_dir: Directory containing annotation files
-        batch_size: Batch size
-        shuffle: Whether to shuffle the dataset
-        num_workers: Number of workers for data loading
-        prev_frame_time_diff: Time difference in seconds to get the previous frame
-        transform: Optional transform to be applied on frames
-
-    Returns:
-        DataLoader instance
-    """
-    dataset = PreprocessedVideoDataset(
-        preprocessed_dir=preprocessed_dir,
-        annotations_dir=annotations_dir,
-        prev_frame_time_diff=prev_frame_time_diff,
-        augment=augment,
-        augment_prob=augment_prob,
-    )
-
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, collate_fn=collate_fn)
-
-    return dataloader

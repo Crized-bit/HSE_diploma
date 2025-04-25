@@ -133,14 +133,14 @@ def draw_bounding_boxes(image, annotations, color=(0, 255, 0), thickness=2):
         Image with bounding boxes drawn
     """
     img_with_boxes = image.copy()
-
+    h, w = image.shape[:2]
     for ann in annotations:
         bbox = ann["bbox"]
         # Convert from center format to corner format
         x1, y1, x2, y2 = cxcywh_to_xyxy(bbox)
 
         # Convert to integers
-        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+        x1, y1, x2, y2 = int(x1 * w), int(y1 * h), int(x2 * w), int(y2 * h)
 
         # Draw bounding box
         cv2.rectangle(img_with_boxes, (x1, y1), (x2, y2), color, thickness)

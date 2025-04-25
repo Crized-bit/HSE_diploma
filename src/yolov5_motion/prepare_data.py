@@ -1,31 +1,28 @@
 import time
 from pathlib import Path
 
+from yolov5_motion.config import my_config
 from yolov5_motion.data.preprocessing import preprocess_videos
 from yolov5_motion.data.dataset_splits import create_dataset_splits, get_dataloaders
 from yolov5_motion.data.utils import draw_bounding_boxes
-from yolov5_motion.config import my_config
+
 import cv2
 import numpy as np
 
 NUM_SAMPLES = 10
-OUTPUT_DIR = "/home/jovyan/p.kudrevatyh/difference"
-CONTROL_MODE = "difference"
+OUTPUT_DIR = "/home/jovyan/p.kudrevatyh/bg_subtraction"
+CONTROL_MODE = "bg_subtraction"
 
 
 def main():
-    if True:
+    if False:
         print("\n===== Preprocessing Videos =====")
         start_time = time.time()
         preprocess_videos(
             videos_dir="/home/jovyan/p.kudrevatyh/yolov5_motion/data/videos",
             annotations_dir="/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations",
             output_dir=OUTPUT_DIR,
-            resize_to=tuple(640, 640),
-            num_workers=my_config.training.workers,
-            prev_frame_time_diff=my_config.data.prev_frame_time_diff,
             control_mode=CONTROL_MODE,
-            control_stack_length=my_config.data.control_stack_length,
         )
         print(f"Preprocessing completed in {time.time() - start_time:.2f} seconds")
 
@@ -34,10 +31,13 @@ def main():
     start_time = time.time()
     datasets = create_dataset_splits(
         preprocessed_dir=OUTPUT_DIR,
-        annotations_dir="/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations",
-        splits_file="/home/jovyan/p.kudrevatyh/yolov5_motion/data/splits.json",
+        annotations_dir=my_config.data.annotations_dir,
+        splits_file=my_config.data.splits_file,
+        augment=my_config.training.augment,
+        augment_prob=my_config.training.augment_prob,
         val_ratio=my_config.training.val_ratio,
         control_stack_length=my_config.data.control_stack_length,
+        prev_frame_time_diff=my_config.data.prev_frame_time_diff,
     )
 
     # Step 3: Create dataloaders

@@ -3,19 +3,12 @@ import json
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Фиксированный базовый путь
 BASE_PATH = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs"
 
-# Здесь вы можете указать названия моделей для сравнения
 MODEL_NAMES = [
-    "base_model",  # Замените на свои модели
-    "bg_sub_1.0",
-    # "bg_sub_lora",
-    "lora",
-    "bg_sub_0.2",
-    # "bg_sub_0.2_lora",
-    "bg_sub_lora",
-    # Добавьте больше моделей при необходимости
+    "yolov5m/base_model",
+    "yolov5n/base_model",
+    "yolov5n/0.2/bg_sub/control_lora",
 ]
 
 
@@ -129,9 +122,6 @@ def plot_metrics():
 
             # Основное значение
             val_text = f"{val:.4f}"
-
-            # Объединяем значение и процентное изменение
-            full_text = val_text + percentage_text
 
             # Цвет текста для процентного изменения
             if model != base_model and percentage_text:
