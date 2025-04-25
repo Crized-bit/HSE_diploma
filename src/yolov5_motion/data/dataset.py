@@ -20,10 +20,7 @@ class PreprocessedVideoDataset(Dataset):
         self,
         preprocessed_dir: str,
         annotations_dir: str = "./annotations",
-        prev_frame_time_diff: float = None,  # Time difference in seconds
         augment: bool = False,
-        augment_prob: float = 0.5,
-        control_stack_length: int = 15,
     ):
         """
         Initialize the dataset.
@@ -38,17 +35,15 @@ class PreprocessedVideoDataset(Dataset):
         self.frames_dir = self.preprocessed_dir / "frames"
         self.control_dir = self.preprocessed_dir / "control_images"
         self.annotations_dir = Path(annotations_dir)
-        self.prev_frame_time_diff = prev_frame_time_diff
         self.augment = augment
-        self.control_stack_length = control_stack_length
         # Setup augmentations if enabled
         if self.augment:
             self.aug_transform = A.Compose(
                 [
                     # Spatial augmentations that apply to both image and control
-                    A.HorizontalFlip(p=augment_prob),
-                    A.RandomResizedCrop(size=(640, 640), scale=(0.6, 1.0), p=augment_prob),
-                    A.Rotate(limit=15, p=augment_prob, fill=(114, 114, 114), fill_mask=(114, 114, 114)),
+                    A.HorizontalFlip(p=my_config.training.augment_prob),
+                    A.RandomResizedCrop(size=(640, 640), scale=(0.6, 1.0), p=my_config.training.augment_prob),
+                    A.Rotate(limit=15, p=my_config.training.augment_prob, fill=(114, 114, 114), fill_mask=(114, 114, 114)),
                     # Color augmentations only for the input image
                     A.OneOf(
                         [
@@ -56,7 +51,7 @@ class PreprocessedVideoDataset(Dataset):
                             A.HueSaturationValue(p=1.0),
                             A.RGBShift(p=1.0),
                         ],
-                        p=augment_prob,
+                        p=my_config.training.augment_prob,
                     ),
                     # Noise and blur
                     A.OneOf(
@@ -64,7 +59,7 @@ class PreprocessedVideoDataset(Dataset):
                             A.GaussNoise(p=1.0),
                             A.GaussianBlur(p=1.0),
                         ],
-                        p=augment_prob * 0.5,
+                        p=my_config.training.augment_prob * 0.5,
                     ),  # Lower probability for these
                 ],
                 bbox_params=A.BboxParams(
@@ -79,11 +74,6 @@ class PreprocessedVideoDataset(Dataset):
         metadata_path = self.preprocessed_dir / "metadata.json"
         with open(metadata_path, "r") as f:
             self.metadata = json.load(f)
-
-        # If prev_frame_time_diff is None, use the one from metadata
-        if prev_frame_time_diff is None and "prev_frame_time_diff" in self.metadata:
-            self.prev_frame_time_diff = self.metadata["prev_frame_time_diff"]
-            print(f"Using prev_frame_time_diff={self.prev_frame_time_diff} from metadata")
 
         # Get all annotation files
         self.annotation_files = list(self.annotations_dir.glob("*.json"))
@@ -179,7 +169,7 @@ class PreprocessedVideoDataset(Dataset):
                     continue
 
                 # Get rid of frames w.o. normal control images
-                if frame_idx <= fps * self.prev_frame_time_diff * self.control_stack_length:
+                if frame_idx <= fps * my_config.data.prev_frame_time_diff * my_config.data.control_stack_length:
                     # print(f"Skipping frame {frame_idx} for video {video_id}")
                     frames_to_skip.add(frame_idx)
                     continue

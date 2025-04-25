@@ -84,22 +84,18 @@ def create_dataset_splits(
         preprocessed_dir=preprocessed_dir,
         annotations_dir=annotations_dir,
         augment=True,
-        augment_prob=augment_prob,
-        control_stack_length=control_stack_length,  # Enable augmentation only for training
     )
 
     val_dataset = PreprocessedVideoDataset(
         preprocessed_dir=preprocessed_dir,
         annotations_dir=annotations_dir,
         augment=False,
-        control_stack_length=control_stack_length,  # No augmentation for validation
     )
 
     test_dataset = PreprocessedVideoDataset(
         preprocessed_dir=preprocessed_dir,
         annotations_dir=annotations_dir,
         augment=False,
-        control_stack_length=control_stack_length,  # No augmentation for testing
     )
 
     # Use the indices with Subset to get the right samples for each dataset

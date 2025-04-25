@@ -324,7 +324,7 @@ class Trainer:
             # Backward pass (no scaler needed for bf16)
             loss.backward()
 
-            torch.nn.utils.clip_grad_norm_(self.model.controlnet.parameters(), max_norm=10.0)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
             self.optimizer.step()
 
             # Update metrics
@@ -378,6 +378,7 @@ class Trainer:
     def validate(self, epoch):
         """Validate the model on the validation set"""
         self.model.eval()
+        # self.model.controlnet.train(False)
         val_loss = 0
         val_metrics = {"box_loss": 0, "obj_loss": 0, "cls_loss": 0}
 
