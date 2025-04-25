@@ -42,17 +42,6 @@ class PreprocessedVideoDataset(Dataset):
                 [
                     # Spatial augmentations that apply to both image and control
                     A.HorizontalFlip(p=my_config.training.augment_prob),
-                    A.RandomResizedCrop(size=(640, 640), scale=(0.6, 1.0), p=my_config.training.augment_prob),
-                    A.Rotate(limit=15, p=my_config.training.augment_prob, fill=(114, 114, 114), fill_mask=(114, 114, 114)),
-                    # Color augmentations only for the input image
-                    A.OneOf(
-                        [
-                            A.RandomBrightnessContrast(p=1.0, ensure_safe_range=True),
-                            A.HueSaturationValue(p=1.0),
-                            A.RGBShift(p=1.0),
-                        ],
-                        p=my_config.training.augment_prob,
-                    ),
                     # Noise and blur
                     A.OneOf(
                         [
@@ -61,6 +50,16 @@ class PreprocessedVideoDataset(Dataset):
                         ],
                         p=my_config.training.augment_prob * 0.5,
                     ),  # Lower probability for these
+                    A.OneOf(
+                        [
+                            A.RandomBrightnessContrast(p=1.0, ensure_safe_range=True),
+                            A.HueSaturationValue(p=1.0),
+                            A.RGBShift(p=1.0),
+                        ],
+                        p=my_config.training.augment_prob,
+                    ),
+                    A.RandomResizedCrop(size=(640, 640), scale=(0.6, 1.0), p=my_config.training.augment_prob),
+                    A.Rotate(limit=15, p=my_config.training.augment_prob, fill=(114, 114, 114), fill_mask=(114, 114, 114)),
                 ],
                 bbox_params=A.BboxParams(
                     format="yolo",
