@@ -100,43 +100,40 @@ def create_dataset_splits(
     }
 
 
-def get_dataloaders(datasets, batch_size=8, num_workers=4):
+def get_dataloaders(datasets):
     """
     Create dataloaders for train, validation, and test datasets.
 
     Args:
-        datasets: Dictionary containing train, val, and test datasets
-        batch_size: Batch size for dataloaders
-        num_workers: Number of workers for data loading
+        datasets: Dictionary containing train, val
 
     Returns:
-        Dictionary containing train, val, and test dataloaders
+        Dictionary containing train, val dataloaders
     """
     dataloaders = {}
 
     # Create train dataloader with shuffling
     dataloaders["train"] = DataLoader(
         datasets["train"],
-        batch_size=batch_size,
+        batch_size=my_config.training.batch_size,
         persistent_workers = True,
         shuffle=True,
-        num_workers=num_workers,
+        num_workers=my_config.training.workers,
         collate_fn=collate_fn,
         pin_memory=True,
         prefetch_factor=2,
     )
 
     # Create validation and test dataloaders without shuffling
-    for split in ["val", "test"]:
-        dataloaders[split] = DataLoader(
-            datasets[split],
-            batch_size=batch_size,
-            persistent_workers = True,
-            shuffle=False,
-            num_workers=num_workers,
-            collate_fn=collate_fn,
-            pin_memory=True,
-            prefetch_factor=2,
-        )
+    dataloaders["val"] = DataLoader(
+        datasets["val"],
+        batch_size=my_config.training.val_batch_size,
+        persistent_workers = True,
+        shuffle=False,
+        num_workers=my_config.training.workers,
+        collate_fn=collate_fn,
+        pin_memory=True,
+        prefetch_factor=2,
+    )
 
     return dataloaders

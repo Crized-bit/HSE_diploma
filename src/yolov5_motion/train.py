@@ -124,20 +124,7 @@ class Trainer:
             augment=my_config.training.augment,  # Enable augmentation
         )
 
-        self.dataloaders = get_dataloaders(
-            datasets=self.datasets, batch_size=my_config.training.batch_size, num_workers=my_config.training.workers
-        )
-
-        # Adjust validation batch size separately if specified
-        if my_config.training.batch_size != my_config.training.val_batch_size:
-            self.dataloaders["val"] = DataLoader(
-                self.datasets["val"],
-                batch_size=my_config.training.val_batch_size,
-                shuffle=False,
-                num_workers=my_config.training.workers,
-                collate_fn=collate_fn,
-                pin_memory=True,
-            )
+        self.dataloaders = get_dataloaders(datasets=self.datasets)
 
         # Setup optimizer
         self.optimizer = self._create_optimizer()

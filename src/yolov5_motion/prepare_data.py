@@ -38,11 +38,7 @@ def main():
     # Step 3: Create dataloaders
     print("\n===== Creating DataLoaders =====")
     start_time = time.time()
-    dataloaders = get_dataloaders(
-        datasets=datasets,
-        batch_size=my_config.training.batch_size,
-        num_workers=my_config.training.workers,
-    )
+    dataloaders = get_dataloaders(datasets=datasets)
 
     # Print dataloader info
     print("\nDataLoader Info:")

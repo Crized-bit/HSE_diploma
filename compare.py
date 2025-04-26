@@ -6,11 +6,18 @@ import numpy as np
 BASE_PATH = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs"
 
 MODEL_NAMES = [
-    "yolov5s/base_model",
     "yolov5n/base_model",
+    "yolov5n/lora",
     "yolov5n/0.2/bg_sub/control_lora",
+    "yolov5n/0.2/bg_sub/control_lora + yolo_lora",
 ]
 
+MODEL_NAMES = [
+    "yolov5m/base_model",
+    "yolov5m/lora",
+    "yolov5m/0.2/bg_sub/control_lora",
+    # "yolov5n/0.2/bg_sub/control_lora + yolo_lora",
+]
 
 def load_metrics(model_name):
     """Загружает метрики из JSON-файла для указанной модели."""

@@ -295,6 +295,11 @@ def test():
     all_pred_boxes = []
     all_true_boxes = []
 
+    # Areas for distributions
+    tp_areas = []
+    fp_areas = []
+    fn_areas = []
+
     # Инициализируем сборщик метрик
     precisions = []
     recalls = []
@@ -348,16 +353,21 @@ def test():
 
                 # Рассчитываем precision и recall для этого изображения
                 if len(true_boxes) > 0 or len(pred_boxes) > 0:
-                    precision, recall, f1 = calculate_precision_recall(
+                    precision, recall, f1, tp_area, fp_area, fn_area = calculate_precision_recall(
                         pred_boxes,
                         true_boxes,
                         iou_threshold=my_config.training.detection.iou_thres,
                         conf_threshold=my_config.training.detection.conf_thres,
+                        mode="test",
                     )
 
                     precisions.append(precision)
                     recalls.append(recall)
                     f1s.append(f1)
+
+                    tp_areas.append(tp_area)
+                    fp_areas.append(fp_area)
+                    fn_areas.append(fn_area)
 
                 # Сохраняем для расчёта mAP
                 all_pred_boxes.append(pred_boxes)
@@ -372,7 +382,16 @@ def test():
     avg_f1 = np.mean(f1s)
 
     # Формируем итоговые метрики
-    test_metrics = {"precision": avg_precision, "recall": avg_recall, "f1": avg_f1, "mAP@0.5": map50, "mAP@0.5:0.95": map}
+    test_metrics = {
+        "precision": avg_precision,
+        "recall": avg_recall,
+        "f1": avg_f1,
+        "mAP@0.5": map50,
+        "mAP@0.5:0.95": map,
+        "tp_areas": tp_areas,
+        "fp_areas": fp_areas,
+        "fn_areas": fn_areas,
+    }
 
     visualize_predictions(model, test_dataloader, device, output_dir)
 

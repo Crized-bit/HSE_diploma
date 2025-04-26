@@ -19,7 +19,7 @@ class DataConfig:
     preprocessed_dir: str = "/home/jovyan/p.kudrevatyh/bg_subtraction"
     annotations_dir: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations"
     splits_file: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/data/splits.json"
-    output_dir: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/yolov5s"
+    output_dir: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/yolov5m"
     control_stack_length: int = 50
     prev_frame_time_diff: float = 0.2
     bbox_skip_percentage: float = 0.2
@@ -28,13 +28,13 @@ class DataConfig:
 @dataclass
 class ModelConfig:
     model_cls: type = ControlNetModelLora
-    yolo_weights: str = "/home/jovyan/p.kudrevatyh/yolov5s.pt"
-    yolo_cfg: str = "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5s.yaml"
+    yolo_weights: str = "/home/jovyan/p.kudrevatyh/yolov5m.pt"
+    yolo_cfg: str = "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml"
     controlnet_weights: Optional[str] = None
     img_size: int = 640
     num_classes: int = 80
-    train_lora: bool = False
-    train_controlnet: bool = False
+    train_lora: bool = True
+    train_controlnet: bool = True
 
 
 @dataclass
@@ -53,7 +53,7 @@ class DetectionConfig:
 
 @dataclass
 class TrainingConfig:
-    checkpoint_name: str = "base_model"
+    checkpoint_name: str = "0.2/bg_sub/control_lora + yolo_lora"
     epochs: int = 200
     batch_size: int = 64
     val_batch_size: int = 128
@@ -80,8 +80,8 @@ class TrainingConfig:
     augment: bool = True
     augment_prob: float = 0.5
 
-    disable_controlnet: bool = True
-    disable_lora: bool = True
+    disable_controlnet: bool = False
+    disable_lora: bool = False
 
 
 @dataclass
