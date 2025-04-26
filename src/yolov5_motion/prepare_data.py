@@ -10,12 +10,13 @@ import cv2
 import numpy as np
 
 NUM_SAMPLES = 100
-OUTPUT_DIR = "/home/jovyan/p.kudrevatyh/bg_subtraction"
-CONTROL_MODE = "bg_subtraction"
+OUTPUT_DIR = "/home/jovyan/p.kudrevatyh/mixed_bg_difference"
+CONTROL_MODE = "mixed"
+SHOULD_PROCESS_VIDEOS = False
 
 
 def main():
-    if False:
+    if SHOULD_PROCESS_VIDEOS:
         print("\n===== Preprocessing Videos =====")
         start_time = time.time()
         preprocess_videos(
@@ -78,10 +79,12 @@ def main():
             # Create a combined visualization
             # Convert from RGB to BGR for cv2
             annotated_frame_bgr = cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR)
-            control_image_bgr = cv2.cvtColor(control_image, cv2.COLOR_RGB2BGR)
-
+            if control_image.shape[-1] == 4:
+                control_image = cv2.cvtColor(control_image, cv2.COLOR_RGBA2BGR)
+            else:
+                control_image = cv2.cvtColor(control_image, cv2.COLOR_RGB2BGR)
             # Stack horizontally
-            combined = np.hstack((annotated_frame_bgr, control_image_bgr))
+            combined = np.hstack((annotated_frame_bgr, control_image))
 
             # Save the visualization
             viz_path = split_dir / f"sample_{idx}.jpg"

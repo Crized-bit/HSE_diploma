@@ -13,7 +13,6 @@ import cv2
 
 from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import DataLoader
 from prodigyopt import Prodigy
 from tqdm import tqdm
 
@@ -29,7 +28,6 @@ from yolov5_motion.data.dataset_splits import create_dataset_splits, get_dataloa
 from yolov5_motion.utils.metrics import calculate_precision_recall, calculate_map
 from yolov5_motion.utils.loss import ComputeLoss
 from yolov5_motion.config import my_config, EnhancedJSONEncoder
-from yolov5_motion.data.dataset import collate_fn
 
 
 class Trainer:
@@ -533,6 +531,9 @@ class Trainer:
                 control = control_images[i].cpu().permute(1, 2, 0).numpy() * 255
                 control = control.astype(np.uint8)
 
+                if control.shape[2] == 4:
+                    control = cv2.cvtColor(control, cv2.COLOR_RGBA2RGB)
+
                 # Draw ground truth annotations in green
                 gt_frame = frame.copy()
                 if i < len(annotations):
@@ -563,14 +564,14 @@ class Trainer:
                 comparison = np.hstack((gt_frame, pred_frame, control))
 
                 # Save the visualization
-                cv2.imwrite(str(self.viz_dir / f"val_epoch{epoch}_sample{i}.jpg"), cv2.cvtColor(comparison, cv2.COLOR_RGB2BGR))
+                cv2.imwrite(str(self.viz_dir / f"val_epoch{epoch}_sample{i}.png"), cv2.cvtColor(comparison, cv2.COLOR_RGB2BGR))
 
             # Create a panel of all samples
             if n_samples > 0:
                 # Load saved images
                 panel_images = []
                 for i in range(n_samples):
-                    img_path = self.viz_dir / f"val_epoch{epoch}_sample{i}.jpg"
+                    img_path = self.viz_dir / f"val_epoch{epoch}_sample{i}.png"
                     if img_path.exists():
                         img = cv2.imread(str(img_path))
                         if img is not None:
@@ -592,7 +593,7 @@ class Trainer:
 
                     if panel:
                         panel = np.vstack(panel)
-                        cv2.imwrite(str(self.viz_dir / f"val_panel_epoch{epoch}.jpg"), panel)
+                        cv2.imwrite(str(self.viz_dir / f"val_panel_epoch{epoch}.png"), panel)
 
     def plot_metrics(self):
         """Plot and save training metrics with enhanced visualizations"""

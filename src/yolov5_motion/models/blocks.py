@@ -32,6 +32,9 @@ class ResConv(nn.Module):
 class ControlNetModel(nn.Module):
     def __init__(self, yolo_model: YOLOv5Model):
         super().__init__()
+
+        from yolov5_motion.config import my_config
+
         # Clone YOLOv5 backbone structure
         self.backbone = nn.ModuleList(
             [
@@ -70,7 +73,7 @@ class ControlNetModel(nn.Module):
                 ),
             ]
         )
-        self.start_conv = ResConv(3, 3)
+        self.start_conv = ResConv(my_config.model.num_input_channels, 3)
 
     def forward(self, intial_img, x):
         x = self.start_conv(x)
@@ -125,6 +128,7 @@ class ControlNetModelLora(nn.Module):
     def __init__(self, yolo_model: YOLOv5Model):
         super().__init__()
         # Clone YOLOv5 backbone structure
+        from yolov5_motion.config import my_config
 
         nodes = nn.ModuleList([module for module in yolo_model.model[:10]])
 
@@ -172,7 +176,7 @@ class ControlNetModelLora(nn.Module):
             ]
         )
 
-        self.start_conv = ResConv(3, 3)
+        self.start_conv = ResConv(my_config.model.num_input_channels, 3)
 
     def forward(self, intial_img, x):
         x = self.start_conv(x)

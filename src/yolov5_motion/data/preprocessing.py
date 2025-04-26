@@ -209,7 +209,7 @@ def preprocess_videos(
                 resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
                 # Save frame as JPEG
-                frame_output_path = video_output_dir / f"frame_{frame_idx:06d}.jpg"
+                frame_output_path = video_output_dir / f"frame_{frame_idx:06d}.png"
                 cv2.imwrite(str(frame_output_path), cv2.cvtColor(resized, cv2.COLOR_RGB2BGR))
 
                 # Process each control frame
@@ -226,10 +226,10 @@ def preprocess_videos(
 
                 # Generate and save control image
                 control_image = create_control_image(preprocessed_control_frames, resized, control_mode)
-
+                control_image[..., :3] = control_image[..., 2::-1]
                 # Save with index to differentiate between multiple control frames
-                control_output_path = control_output_dir / f"control_{frame_idx:06d}.jpg"
-                cv2.imwrite(str(control_output_path), cv2.cvtColor(control_image, cv2.COLOR_RGB2BGR))
+                control_output_path = control_output_dir / f"control_{frame_idx:06d}.png"
+                cv2.imwrite(str(control_output_path), control_image)
 
             # Clear memory
             del frames_dict

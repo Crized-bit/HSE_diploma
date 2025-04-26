@@ -42,38 +42,20 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
 
     elif mode == "difference":
         # Calculate difference in each color channel
-        prev_gray = cv2.cvtColor(prev_image, cv2.COLOR_BGR2GRAY).astype(np.float32)
-        cur_gray = cv2.cvtColor(cur_image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        cur_image = cur_image.astype(np.float32)
+        prev_image = prev_image.astype(np.float32)
 
-        # Вычисление разницы со знаком (нормализация для лучшего обучения нейросети)
-        raw_diff = cv2.absdiff(cur_gray, prev_gray)
+        control_image = np.zeros((cur_image.shape[0], cur_image.shape[1], 3), dtype=np.float32)
+        control_image[..., 0] = cur_image[..., 0] - prev_image[..., 0]
+        control_image[..., 1] = cur_image[..., 1] - prev_image[..., 1]
+        control_image[..., 2] = cur_image[..., 2] - prev_image[..., 2]
 
-        # Создание 3-канального изображения
-        result = np.zeros((cur_image.shape[0], cur_image.shape[1], 3), dtype=np.uint8)
+        mask = np.abs(control_image) < 15
 
-        # Канал 0 (Red): текущее изображение в оттенках серого - дает контекст
-        result[:, :, 0] = cur_gray.astype(np.uint8)
+        control_image = ((control_image + 255) / 2).astype(np.uint8)
 
-        # Канал 1 (Green): разница в изображениях
-        diff = np.clip(raw_diff, 0, 255).astype(np.uint8)
-        diff = cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX)
-        result[:, :, 1] = diff
-
-        # Create background model from frame stack
-        bg_subtractor = cv2.createBackgroundSubtractorKNN(detectShadows=True)
-
-        # Add all previous frames to the model
-        for frame in frames_stack:
-            # frame_gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-            bg_subtractor.apply(frame)
-
-        # Канал 2 (Blue): маска от BG
-        fg_mask = bg_subtractor.apply(cur_image)
-
-        # fg_mask = cv2.normalize(fg_mask, None, 0, 255, cv2.NORM_MINMAX)
-
-        result[:, :, 2] = fg_mask
-        return result
+        control_image[mask] = 0
+        return control_image
 
     elif mode == "bg_subtraction":
         # Use proper background subtraction with multiple frames
@@ -96,6 +78,43 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
         result = cv2.cvtColor(fg_mask, cv2.COLOR_GRAY2RGB)
 
         return result
+
+    elif mode == "mixed":
+        # Use proper background subtraction with multiple frames
+
+        # Create background model from frame stack
+        bg_subtractor = cv2.createBackgroundSubtractorKNN(detectShadows=True, history=len(frames_stack) + 1)
+
+        # Add all previous frames to the model
+        for frame in frames_stack:
+            # frame_gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            bg_subtractor.apply(frame)
+
+        # Get foreground mask for current frame
+        fg_mask = bg_subtractor.apply(cur_image)
+
+        # fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8), iterations = 1,)
+        # fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8), iterations = 1,)
+
+        # Create control image from foreground mask
+        cur_image = cur_image.astype(np.float32)
+        prev_image = prev_image.astype(np.float32)
+
+        control_image = np.zeros((cur_image.shape[0], cur_image.shape[1], 4), dtype=np.float32)
+        control_image[..., 0] = cur_image[..., 0] - prev_image[..., 0]
+        control_image[..., 1] = cur_image[..., 1] - prev_image[..., 1]
+        control_image[..., 2] = cur_image[..., 2] - prev_image[..., 2]
+
+        mask = np.abs(control_image) < 15
+
+        control_image[..., :3] = (control_image[..., :3] + 255) / 2
+        control_image[mask] = 0
+        control_image[..., 3] = fg_mask
+
+        control_image = control_image.astype(np.uint8)
+        
+
+        return control_image
 
     else:
         raise ValueError(f"Unknown mode: {mode}. Valid modes are 'flow', 'difference', 'diff_color', 'bg_subtraction'")

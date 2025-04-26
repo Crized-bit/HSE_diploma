@@ -17,13 +17,6 @@ def calculate_precision_recall(pred_boxes, true_boxes, iou_threshold=0.5, conf_t
         recall: Recall value
         f1: F1 score
     """
-    if not pred_boxes or not true_boxes:
-        if not pred_boxes and not true_boxes:  # No objects predicted and none present
-            return 1.0, 1.0, 1.0
-        if not pred_boxes:  # No objects predicted but some present
-            return 0.0, 0.0, 0.0
-        if not true_boxes:  # Objects predicted but none present
-            return 0.0, 0.0, 0.0
 
     tp_area = []
     fp_area = []
@@ -78,8 +71,8 @@ def calculate_precision_recall(pred_boxes, true_boxes, iou_threshold=0.5, conf_t
     num_predictions = len(pred_boxes)
     num_ground_truth = len(true_boxes)
 
-    precision = true_positives / max(num_predictions, 1)
-    recall = true_positives / max(num_ground_truth, 1)
+    precision = true_positives / max(num_predictions, 1) if num_predictions else 1
+    recall = true_positives / max(num_ground_truth, 1) if num_ground_truth else 1
 
     # Calculate F1 score
     f1 = 2 * precision * recall / max(precision + recall, 1e-6)

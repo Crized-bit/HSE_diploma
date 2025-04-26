@@ -16,10 +16,10 @@ class EnhancedJSONEncoder(json.JSONEncoder):
 
 @dataclass
 class DataConfig:
-    preprocessed_dir: str = "/home/jovyan/p.kudrevatyh/bg_subtraction"
+    preprocessed_dir: str = "/home/jovyan/p.kudrevatyh/mixed_bg_difference"
     annotations_dir: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations"
     splits_file: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/data/splits.json"
-    output_dir: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/yolov5m"
+    output_dir: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/yolov5n"
     control_stack_length: int = 50
     prev_frame_time_diff: float = 0.2
     bbox_skip_percentage: float = 0.2
@@ -28,11 +28,12 @@ class DataConfig:
 @dataclass
 class ModelConfig:
     model_cls: type = ControlNetModelLora
-    yolo_weights: str = "/home/jovyan/p.kudrevatyh/yolov5m.pt"
-    yolo_cfg: str = "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5m.yaml"
+    yolo_weights: str = "/home/jovyan/p.kudrevatyh/yolov5n.pt"
+    yolo_cfg: str = "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5n.yaml"
     controlnet_weights: Optional[str] = None
     img_size: int = 640
     num_classes: int = 80
+    num_input_channels: int = 4
     train_lora: bool = True
     train_controlnet: bool = True
 
@@ -53,10 +54,10 @@ class DetectionConfig:
 
 @dataclass
 class TrainingConfig:
-    checkpoint_name: str = "0.2/bg_sub/control_lora + yolo_lora"
+    checkpoint_name: str = "0.2/mixed/control_lora + yolo_lora"
     epochs: int = 200
     batch_size: int = 64
-    val_batch_size: int = 128
+    val_batch_size: int = 32
     workers: int = 8
     val_ratio: float = 0.2
 

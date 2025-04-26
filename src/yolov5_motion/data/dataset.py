@@ -189,8 +189,8 @@ class PreprocessedVideoDataset(Dataset):
                 if frame_idx in frames_to_skip:
                     continue
                 # Construct file paths
-                current_frame_path = video_dir / f"frame_{frame_idx:06d}.jpg"
-                control_image_path = self.control_dir / video_id / f"control_{frame_idx:06d}.jpg"
+                current_frame_path = video_dir / f"frame_{frame_idx:06d}.png"
+                control_image_path = self.control_dir / video_id / f"control_{frame_idx:06d}.png"
 
                 # Skip if files don't exist
                 if not current_frame_path.exists():
@@ -234,8 +234,9 @@ class PreprocessedVideoDataset(Dataset):
         current_frame = cv2.cvtColor(current_frame, cv2.COLOR_BGR2RGB)
 
         # Load precomputed control image
-        control_image = cv2.imread(sample["control_image_path"])
-        control_image = cv2.cvtColor(control_image, cv2.COLOR_BGR2RGB)
+        control_image = cv2.imread(sample["control_image_path"], cv2.IMREAD_UNCHANGED)
+        control_image[..., :3] = control_image[..., 2::-1]
+        # control_image = cv2.cvtColor(control_image, cv2.COLOR_BGR2RGB)
 
         # Extract bboxes for augmentation
         bboxes = []
@@ -261,7 +262,7 @@ class PreprocessedVideoDataset(Dataset):
         current_frame_padded = np.ones((my_config.model.img_size, my_config.model.img_size, 3), dtype=np.uint8) * np.array(
             114, dtype=np.uint8
         )
-        control_image_padded = np.ones((my_config.model.img_size, my_config.model.img_size, 3), dtype=np.uint8) * np.array(
+        control_image_padded = np.ones((my_config.model.img_size, my_config.model.img_size, control_image.shape[2]), dtype=np.uint8) * np.array(
             114, dtype=np.uint8
         )
 

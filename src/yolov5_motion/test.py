@@ -1,7 +1,7 @@
-from codecs import ascii_decode
 import os
 import sys
 import torch
+import math
 import numpy as np
 import json
 import cv2
@@ -27,6 +27,7 @@ from yolov5_motion.utils.metrics import calculate_precision_recall, calculate_ma
 from yolov5_motion.data.utils import draw_bounding_boxes
 from yolov5_motion.data.dataset import collate_fn
 from yolov5_motion.config import my_config
+from yolov5_motion.utils.metrics import calculate_box_area
 
 
 def visualize_predictions(model, dataloader, device, output_dir):
@@ -109,6 +110,8 @@ def visualize_predictions(model, dataloader, device, output_dir):
                         cv2.putText(pred_frame, label, (xyxy[0], xyxy[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
                 # Создаём слайд из трёх изображений: GT, Predictions, Control Image
+                if control.shape[2] == 4:
+                    control = cv2.cvtColor(control, cv2.COLOR_RGBA2RGB)
                 comparison = np.hstack((gt_frame, pred_frame, control))
 
                 # Добавляем заголовки
@@ -117,7 +120,7 @@ def visualize_predictions(model, dataloader, device, output_dir):
                 comparison_with_header = np.vstack((header, comparison))
 
                 # Сохраняем визуализацию
-                cv2.imwrite(str(vis_dir / f"test_sample_{i}.jpg"), cv2.cvtColor(comparison_with_header, cv2.COLOR_RGB2BGR))
+                cv2.imwrite(str(vis_dir / f"test_sample_{i}.png"), cv2.cvtColor(comparison_with_header, cv2.COLOR_RGB2BGR))
 
                 # Добавляем в панель
                 if not panel_images:
@@ -143,8 +146,8 @@ def visualize_predictions(model, dataloader, device, output_dir):
 
                 if panel:
                     panel = np.vstack(panel)
-                    cv2.imwrite(str(vis_dir / "test_panel.jpg"), cv2.cvtColor(panel, cv2.COLOR_RGB2BGR))
-                    print(f"Visualization panel saved to {vis_dir}/test_panel.jpg")
+                    cv2.imwrite(str(vis_dir / "test_panel.png"), cv2.cvtColor(panel, cv2.COLOR_RGB2BGR))
+                    print(f"Visualization panel saved to {vis_dir}/test_panel.png")
 
         except Exception as e:
             print(f"Error during visualization: {e}")
@@ -296,9 +299,8 @@ def test():
     all_true_boxes = []
 
     # Areas for distributions
-    tp_areas = []
-    fp_areas = []
-    fn_areas = []
+    pred_areas = []
+    true_areas = []
 
     # Инициализируем сборщик метрик
     precisions = []
@@ -365,16 +367,23 @@ def test():
                     recalls.append(recall)
                     f1s.append(f1)
 
-                    tp_areas.append(tp_area)
-                    fp_areas.append(fp_area)
-                    fn_areas.append(fn_area)
-
                 # Сохраняем для расчёта mAP
                 all_pred_boxes.append(pred_boxes)
                 all_true_boxes.append(true_boxes)
 
     # Рассчитываем mAP
     map50, map = calculate_map(all_pred_boxes, all_true_boxes)
+
+    # Рассчитываем mAP для каждого бина
+
+    bins_of_true_boxes, bins_of_pred_boxes, edges = create_log_bins(all_true_boxes, all_pred_boxes, num_bins=20)
+
+    bin_maps50 = []
+    bin_maps = []
+    for bin_of_true_boxes, bin_of_pred_boxes in zip(bins_of_true_boxes, bins_of_pred_boxes):
+        bin_map50, bin_map = calculate_map(bin_of_pred_boxes, bin_of_true_boxes)
+        bin_maps50.append(bin_map50)
+        bin_maps.append(bin_map)
 
     # Рассчитываем среднюю precision и recall по всем изображениям
     avg_precision = np.mean(precisions)
@@ -388,9 +397,9 @@ def test():
         "f1": avg_f1,
         "mAP@0.5": map50,
         "mAP@0.5:0.95": map,
-        "tp_areas": tp_areas,
-        "fp_areas": fp_areas,
-        "fn_areas": fn_areas,
+        "bin_mAP@0.5": bin_maps50,
+        "bin_mAP@0.5:0.95": bin_maps,
+        "edges": edges,
     }
 
     visualize_predictions(model, test_dataloader, device, output_dir)
@@ -401,7 +410,8 @@ def test():
     # Печатаем результаты тестирования
     print("\nTest Results:")
     for k, v in test_metrics.items():
-        print(f"{k}: {v:.4f}")
+        if not isinstance(v, list):
+            print(f"{k}: {v:.4f}")
 
     # Сохраняем результаты тестирования в файл
     with open(output_dir / "test_results.json", "w") as f:
@@ -410,6 +420,61 @@ def test():
     print(f"\nTest results saved to {output_dir}")
 
     return test_metrics
+
+
+def create_log_bins(true_boxes_per_image, pred_boxes_per_image, num_bins=10):
+    # Calculate area for each image and bbox
+    true_areas = [[calculate_box_area(bbox[:4]) for bbox in true_boxes] for true_boxes in true_boxes_per_image]
+    pred_areas = [[calculate_box_area(bbox[:4]) for bbox in pred_boxes] for pred_boxes in pred_boxes_per_image]
+
+    # Determine number of images
+    num_images = len(true_boxes_per_image)
+
+    # Find min and max areas across all images
+    flat_true_areas = [area for img_areas in true_areas for area in img_areas if img_areas]
+
+    min_area = min(flat_true_areas) if flat_true_areas else 1e-6
+    max_area = max(flat_true_areas) if flat_true_areas else 1.0
+
+    # Handle edge case if min_area is 0
+    if min_area <= 0:
+        min_area = 1e-6  # Small positive value
+
+    # Create log-scale bin edges
+    log_min = math.log10(min_area)
+    log_max = math.log10(max_area)
+    bin_edges = np.logspace(log_min, log_max, num_bins + 1)
+
+    # Initialize output structure
+    # bins[bin_idx][img_idx] = list of boxes in bin_idx from image img_idx
+    true_bins = [[[] for _ in range(num_images)] for _ in range(num_bins)]
+    pred_bins = [[[] for _ in range(num_images)] for _ in range(num_bins)]
+
+    # Assign true boxes to bins
+    for img_idx, (true_boxes, img_areas) in enumerate(zip(true_boxes_per_image, true_areas)):
+        for box_idx, (box, area) in enumerate(zip(true_boxes, img_areas)):
+            # Find the correct bin
+            bin_idx = np.digitize(area, bin_edges) - 1
+            # Handle edge case for maximum value
+            if bin_idx == num_bins:
+                bin_idx = num_bins - 1
+            elif bin_idx < 0:  # Handle potential underflow
+                bin_idx = 0
+            true_bins[bin_idx][img_idx].append(box)
+
+    # Assign predicted boxes to bins
+    for img_idx, (pred_boxes, img_areas) in enumerate(zip(pred_boxes_per_image, pred_areas)):
+        for box_idx, (box, area) in enumerate(zip(pred_boxes, img_areas)):
+            # Find the correct bin
+            bin_idx = np.digitize(area, bin_edges) - 1
+            # Handle edge cases
+            if bin_idx == num_bins:
+                bin_idx = num_bins - 1
+            elif bin_idx < 0:
+                bin_idx = 0
+            pred_bins[bin_idx][img_idx].append(box)
+
+    return true_bins, pred_bins, bin_edges.tolist()
 
 
 if __name__ == "__main__":
