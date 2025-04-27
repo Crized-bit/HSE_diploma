@@ -2,8 +2,6 @@ import os
 import json
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import seaborn as sns
 
 # Base path to your data
 BASE_PATH = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs"
@@ -12,9 +10,9 @@ BASE_PATH = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs"
 MODEL_NAMES = [
     # "yolov5n/base_model",
     "yolov5n/lora",
-    # "yolov5n/0.2/bg_sub/control_lora",
-    "yolov5n/0.2/bg_sub/control_lora + yolo_lora",
+    # "yolov5n/0.2/bg_sub/control_lora + yolo_lora",
     "yolov5n/0.2/difference/control_lora + yolo_lora",
+    # "yolov5n/0.2/mixed/control_lora + yolo_lora",
 ]
 
 COLOR_PALETTE = [
@@ -22,7 +20,7 @@ COLOR_PALETTE = [
     "#F3863F",  # Bright Orange
     # "#5D4A98",  # Royal Purple
     "#2E7D32",  # Forest Green
-    "#C62828",  # Deep Red
+    # "#C62828",  # Deep Red
 ]
 
 # For positive/negative indicators
@@ -63,7 +61,7 @@ def load_metrics(model_name):
 def plot_metrics():
     """Creates a comparative histogram of metrics for specified models with percentage change."""
     # Metrics we want to display
-    metrics = ["f1", "mAP@0.5", "mAP@0.5:0.95", "precision", "recall"]
+    metrics = ["mAP@0.5", "mAP@0.5:0.95"]
 
     # Number of models and metrics
     n_models = len(MODEL_NAMES)
@@ -315,5 +313,5 @@ def plot_simple_histograms():
 
 
 if __name__ == "__main__":
-    plot_metrics()
+    # plot_metrics()
     plot_simple_histograms()

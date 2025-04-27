@@ -16,7 +16,7 @@ class EnhancedJSONEncoder(json.JSONEncoder):
 
 @dataclass
 class DataConfig:
-    preprocessed_dir: str = "/home/jovyan/p.kudrevatyh/mixed_bg_difference"
+    preprocessed_dir: str = "/home/jovyan/p.kudrevatyh/optical_flow"
     annotations_dir: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations"
     splits_file: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/data/splits.json"
     output_dir: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/yolov5n"
@@ -33,7 +33,7 @@ class ModelConfig:
     controlnet_weights: Optional[str] = None
     img_size: int = 640
     num_classes: int = 80
-    num_input_channels: int = 4
+    num_input_channels: int = 3
     train_lora: bool = True
     train_controlnet: bool = True
 
@@ -54,7 +54,7 @@ class DetectionConfig:
 
 @dataclass
 class TrainingConfig:
-    checkpoint_name: str = "0.2/mixed/control_lora + yolo_lora"
+    checkpoint_name: str = "0.2/flow/control_lora + yolo_lora"
     epochs: int = 200
     batch_size: int = 64
     val_batch_size: int = 32

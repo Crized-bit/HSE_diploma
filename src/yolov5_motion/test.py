@@ -298,10 +298,6 @@ def test():
     all_pred_boxes = []
     all_true_boxes = []
 
-    # Areas for distributions
-    pred_areas = []
-    true_areas = []
-
     # Инициализируем сборщик метрик
     precisions = []
     recalls = []
