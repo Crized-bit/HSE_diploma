@@ -10,9 +10,9 @@ import cv2
 import numpy as np
 
 NUM_SAMPLES = 100
-OUTPUT_DIR = "/home/jovyan/p.kudrevatyh/mixed_bg_difference"
-CONTROL_MODE = "mixed"
-SHOULD_PROCESS_VIDEOS = False
+OUTPUT_DIR = "/home/jovyan/p.kudrevatyh/bg_subtraction"
+CONTROL_MODE = "bg_subtraction"
+SHOULD_PROCESS_VIDEOS = True
 
 
 def main():

@@ -29,8 +29,8 @@ def preprocess_videos(
 
     # Create output directories if they don't exist
     if output_path.exists():
-        print(f"Output directory {output_path} already exists. Removing...")
-        shutil.rmtree(output_path)
+        print(f"Output directory {output_path} already exists.")
+        exit(1)
 
     output_path.mkdir(parents=True, exist_ok=True)
     frames_path.mkdir(parents=True, exist_ok=True)

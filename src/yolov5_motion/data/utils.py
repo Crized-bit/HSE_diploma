@@ -21,15 +21,11 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
     # Get the most recent previous frame
     prev_image = frames_stack[-1] if frames_stack else None
 
-    if prev_image is None:
-        # If no previous frames available, return grayscale version of current
-        return cv2.cvtColor(cv2.cvtColor(cur_image, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
-
-    # Convert images to grayscale
-    prev_gray = cv2.cvtColor(prev_image, cv2.COLOR_RGB2GRAY)
-    cur_gray = cv2.cvtColor(cur_image, cv2.COLOR_RGB2GRAY)
-
     if mode == "flow":
+        # Convert images to grayscale
+        prev_gray = cv2.cvtColor(prev_image, cv2.COLOR_RGB2GRAY)
+        cur_gray = cv2.cvtColor(cur_image, cv2.COLOR_RGB2GRAY)
+
         # Calculate optical flow using Farneback method
         flow = cv2.calcOpticalFlowFarneback(prev_gray, cur_gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)
         # Convert flow to RGB using HSV color wheel
@@ -112,12 +108,11 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
         control_image[..., 3] = fg_mask
 
         control_image = control_image.astype(np.uint8)
-        
 
         return control_image
 
     else:
-        raise ValueError(f"Unknown mode: {mode}. Valid modes are 'flow', 'difference', 'diff_color', 'bg_subtraction'")
+        raise ValueError(f"Unknown mode: {mode}. Valid modes are 'flow', 'difference', 'mixed', 'bg_subtraction'")
 
 
 def cxcywh_to_xyxy(bbox):
