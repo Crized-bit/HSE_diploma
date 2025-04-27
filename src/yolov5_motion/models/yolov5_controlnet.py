@@ -48,6 +48,7 @@ class YOLOv5WithControlNet(nn.Module):
         control_scale: float = 1.0,
         lora_alpha: float = 16.0,
         lora_rank: int = 32,
+        should_share_weights=True,
     ):
         """
         Initializes YOLOv5 model with ControlNet integration
@@ -76,7 +77,7 @@ class YOLOv5WithControlNet(nn.Module):
             r=lora_rank, lora_alpha=lora_alpha, target_modules=r"1[7-9].*\.conv|2[0-3].*\.conv|24\.m\.[0-2]", bias="none"
         )
         # Initialize ControlNet with the YOLOv5 model
-        self.controlnet = my_config.model.model_cls(self.yolo)
+        self.controlnet = my_config.model.model_cls(self.yolo, should_share_weights=should_share_weights)
         if controlnet_weights is not None:
             self.controlnet.load_state_dict(controlnet_weights)
             print(f"Loaded ControlNet weights from file")
@@ -191,7 +192,15 @@ class YOLOv5WithControlNet(nn.Module):
 
 # Helper function to create the combined model
 def create_combined_model(
-    cfg, yolo_weights=None, controlnet_weights=None, lora_weights=None, img_size=640, nc=80, lora_scale=1.0, control_scale=1.0
+    cfg,
+    yolo_weights=None,
+    controlnet_weights=None,
+    lora_weights=None,
+    img_size=640,
+    nc=80,
+    lora_scale=1.0,
+    control_scale=1.0,
+    should_share_weights=True,
 ):
     """
     Create YOLOv5 with ControlNet integration
@@ -250,6 +259,7 @@ def create_combined_model(
         lora_weights=lora_weights,
         lora_scale=lora_scale,
         control_scale=control_scale,
+        should_share_weights=should_share_weights,
     )
 
     # Make sure img_size is divisible by stride
@@ -401,7 +411,9 @@ if __name__ == "__main__":
     }
 
     # # Save regular checkpoint
-    checkpoint_path = Path("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/yolov5s/base_model/checkpoints") / f"best_model.pt"
+    checkpoint_path = (
+        Path("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/yolov5s/base_model/checkpoints") / f"best_model.pt"
+    )
     torch.save(checkpoint, checkpoint_path)
     # model.save_lora("/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/lora/checkpoints/lora.pt")
 

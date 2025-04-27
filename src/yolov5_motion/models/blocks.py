@@ -30,7 +30,7 @@ class ResConv(nn.Module):
 
 
 class ControlNetModel(nn.Module):
-    def __init__(self, yolo_model: YOLOv5Model):
+    def __init__(self, yolo_model: YOLOv5Model, should_share_weights: bool):
         super().__init__()
 
         from yolov5_motion.config import my_config
@@ -125,7 +125,7 @@ class ControlNetModel(nn.Module):
 
 
 class ControlNetModelLora(nn.Module):
-    def __init__(self, yolo_model: YOLOv5Model):
+    def __init__(self, yolo_model: YOLOv5Model, should_share_weights: bool):
         super().__init__()
         # Clone YOLOv5 backbone structure
         from yolov5_motion.config import my_config
@@ -150,8 +150,12 @@ class ControlNetModelLora(nn.Module):
             ]
         )
 
-        for my_node, yolo_node in zip(self.nodes, nodes):
-            share_weights_recursive(yolo_node, my_node)
+        if should_share_weights:
+            for my_node, yolo_node in zip(self.nodes, nodes):
+                share_weights_recursive(yolo_node, my_node)
+        else:
+            for my_node, yolo_node in zip(self.nodes, nodes):
+                my_node.load_state_dict(yolo_node.state_dict())
 
         config = peft.LoraConfig(
             r=32,
