@@ -134,7 +134,11 @@ class YOLOv5WithControlNet(nn.Module):
         # Initial processing through YOLO backbone
         y = []  # outputs
         i = 0
-        for idx, m in enumerate(self.yolo.model.base_model.model):
+        if isinstance(self.yolo.model, peft.PeftModel):
+            model = self.yolo.model.base_model.model
+        else:
+            model = self.yolo.model
+        for idx, m in enumerate(model):
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]
 
@@ -220,12 +224,29 @@ def create_combined_model(
         print(f"Warning: YOLOv5 weights file {yolo_weights} not found")
         state_dict = None
 
+    # Load YOLOv5 weights if provided
+    if controlnet_weights:
+        if controlnet_weights.endswith(".pt"):
+            if os.path.exists(controlnet_weights):
+                control_dict = torch.load(controlnet_weights, map_location="cpu")
+                # Handle different YOLOv5 weight formats
+                if isinstance(control_dict, dict):
+                    if "model" in control_dict:
+                        control_dict = control_dict["model"]
+                    if hasattr(control_dict, "float"):
+                        control_dict = control_dict.float()
+                    if hasattr(control_dict, "state_dict"):
+                        control_dict = control_dict.state_dict()
+    else:
+        print(f"Warning: YOLOv5 weights file {yolo_weights} not found")
+        control_dict = None
+
     # Create model
     model = YOLOv5WithControlNet(
         cfg=cfg,
         nc=nc,
         yolo_weights=state_dict,
-        controlnet_weights=controlnet_weights,
+        controlnet_weights=control_dict,
         lora_weights=lora_weights,
         lora_scale=lora_scale,
         control_scale=control_scale,

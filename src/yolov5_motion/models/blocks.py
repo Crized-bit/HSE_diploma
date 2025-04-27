@@ -179,22 +179,27 @@ class ControlNetModelLora(nn.Module):
         self.start_conv = ResConv(my_config.model.num_input_channels, 3)
 
     def forward(self, intial_img, x):
+        if isinstance(self.nodes, peft.PeftModel):
+            model = self.nodes.base_model.model
+        else:
+            model = self.nodes
+
         x = self.start_conv(x)
         x = x + intial_img
         # Convs
-        x = self.nodes.base_model.model[0](x)
-        x = self.nodes.base_model.model[1](x)
+        x = model[0](x)
+        x = model[1](x)
         # C3 + Res Con
-        x = self.nodes.base_model.model[2](x)
+        x = model[2](x)
         # Conv
-        x = self.nodes.base_model.model[3](x)
+        x = model[3](x)
 
         ####### 17 out #####
         conv_17_out = x + self.convs[0](x)
         ####################
 
         # C3
-        x = self.nodes.base_model.model[4](x)
+        x = model[4](x)
         #####################
 
         ####### 18 out #####
@@ -202,26 +207,26 @@ class ControlNetModelLora(nn.Module):
         ####################
 
         # Conv
-        x = self.nodes.base_model.model[5](x)
+        x = model[5](x)
 
         ####### 19 out #####
         conv_19_out = x + self.convs[2](x)
         ####################
 
-        x = self.nodes.base_model.model[6](x)
+        x = model[6](x)
 
         ####### 20 out #####
         conv_20_out = x + self.convs[3](x)
         ####################
 
-        x = self.nodes.base_model.model[7](x)
+        x = model[7](x)
 
-        x = self.nodes.base_model.model[8](x)
+        x = model[8](x)
         ####### 22 out #####
         conv_22_out = self.convs[4](x)
         ####################
 
-        x = self.nodes.base_model.model[9](x)
+        x = model[9](x)
 
         ####### 23 out #####
         conv_23_out = self.convs[5](x)
