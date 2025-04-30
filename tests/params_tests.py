@@ -1,8 +1,5 @@
-#!/usr/bin/env python3
 import torch
 import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
 from pathlib import Path
 
 from yolov5_motion.models.yolov5_controlnet import create_combined_model
@@ -37,7 +34,6 @@ def analyze_model_configs():
         ("YOLOv5 Base", create_base_model),
         ("YOLOv5 + LoRA", create_lora_model),
         ("YOLOv5 + LoRA + ControlNet", create_full_model),
-        # ("YOLOv5 + LoRA + ControlNet Fused", create_full_model_fused),
     ]
 
     infer_configs = [
@@ -193,6 +189,7 @@ def create_full_model_infer_shared():
 
     return model
 
+
 def create_full_model_infer_fused():
     """Create YOLOv5 model with both LoRA and ControlNet"""
     # Use the same config as your project
@@ -207,7 +204,7 @@ def create_full_model_infer_fused():
         lora_weights=None,
         img_size=my_config.model.img_size,
         nc=my_config.model.num_classes,
-        should_share_weights=False
+        should_share_weights=False,
     )
 
     # Make sure all parameters are initially not trainable
