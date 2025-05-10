@@ -70,7 +70,7 @@ preprocess_videos(
     control_mode="bg_subtraction",  # Options: "flow", "bg_subtraction", "difference", "mixed"
 )
 ```
-
+All data should be in [PersonPath22](https://amazon-science.github.io/tracking-dataset/personpath22.html) format! You can download dataset from [their official repo](https://github.com/amazon-science/tracking-dataset).
 ### Training
 
 ```python
@@ -125,19 +125,20 @@ Our experiments show that adding motion context via ControlNet significantly imp
 
 | Model | mAP@0.5 | mAP@0.5:0.95 |
 |-------|---------|--------------|
-| YOLOv5n Base | 0.8342 | 0.5438 |
-| YOLOv5n + Background Subtraction | 0.8734 | 0.5689 |
-| YOLOv5n + Optical Flow | 0.8821 | 0.5743 |
-| YOLOv5n + Mixed Mode | 0.8786 | 0.5723 |
+| YOLOv5n Base | 0.4523 | 0.2493 |
+| YOLOv5n + LoRA | 0.6197 | 0.3228 |
+| YOLOv5n + Background Subtraction | 0.6188 | 0.3193 |
+| YOLOv5n + Fame Difference | 0.6193 | 0.3264 |
+| YOLOv5n + Mixed Mode | 0.6231 | 0.3157 |
 
-### Inference Speed
+### Inference Speed on A100
 
 | Model Configuration | FPS (640×640) | Latency (ms) |
 |---------------------|---------------|--------------|
-| YOLOv5n Base | 180 | 5.56 |
-| YOLOv5n + LoRA | 178 | 5.62 |
-| YOLOv5n + LoRA + ControlNet (Shared) | 142 | 7.04 |
-| YOLOv5n + LoRA + ControlNet (Fused) | 140 | 7.14 |
+| YOLOv5n Base | ≈ 140 | ≈ 7.2 |
+| YOLOv5n + LoRA | ≈ 140 | ≈ 7.2 |
+| YOLOv5n + LoRA + ControlNet (Fused) | ≈ 85 | ≈ 11.9 |
+| YOLOv5n + LoRA + ControlNet (Shared) | ≈ 65 | ≈ 16.1 |
 
 ## Citation
 

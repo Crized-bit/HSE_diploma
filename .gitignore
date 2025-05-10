@@ -9,4 +9,4 @@
 # *.png
 *jpg
 *.pdf
-*.txt
+# *.txt
