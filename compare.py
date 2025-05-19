@@ -12,7 +12,7 @@ MODEL_NAMES = [
     "yolov5n/lora",
     "yolov5n/0.2/bg_sub/control_lora + yolo_lora",
     "yolov5n/0.2/difference/control_lora + yolo_lora",
-    # "yolov5n/0.2/mixed/control_lora + yolo_lora",
+    "yolov5n/0.2/mixed/control_lora + yolo_lora",
     # "yolov5n/0.2/flow/control_lora + yolo_lora",
 ]
 

@@ -68,7 +68,7 @@ def test_preprocessing_fps(video_path, num_frames=32):
 
     substractor = cv2.createBackgroundSubtractorKNN(detectShadows=True)
     # Process frames in batches
-    for method in ["flow", "bg_subtraction", "difference", "canny"]:
+    for method in ["flow", "bg_subtraction", "difference"]:
         print(f"\nTesting {method} method...")
 
         # Process in batches to simulate the control stack length
@@ -410,11 +410,11 @@ def main():
         },
     ]
 
-    # preprocessing_results = test_preprocessing_fps("/home/jovyan/p.kudrevatyh/yolov5_motion/data/videos/uid_vid_00006.mp4", num_frames=32)
-    # plot_preprocessing_results(preprocessing_results, output_dir / "preprocessing")
+    preprocessing_results = test_preprocessing_fps("/home/jovyan/p.kudrevatyh/yolov5_motion/data/videos/uid_vid_00006.mp4", num_frames=32)
+    plot_preprocessing_results(preprocessing_results, output_dir / "preprocessing")
 
-    inference_results = test_model_inference_fps(model_configs, num_iterations=300*32)
-    plot_inference_results(inference_results, output_dir / "inference")
+    # inference_results = test_model_inference_fps(model_configs, num_iterations=300*32)
+    # plot_inference_results(inference_results, output_dir / "inference")
 
     print(f"\nAll tests completed. Results saved to {output_dir}")
 
