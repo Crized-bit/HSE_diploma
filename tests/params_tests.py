@@ -234,7 +234,7 @@ def visualize_results(results):
         ]
         colors = ["#ff9999", "#66b3ff"]
 
-        ax.pie(sizes, labels=labels, colors=colors, autopct="%1.1f%%", startangle=90, textprops={"fontsize": 9})
+        ax.pie(sizes, labels=labels, colors=colors, autopct="%1.1f%%", startangle=90, textprops={"fontsize": 13})
         ax.set_title(name)
 
     plt.tight_layout()
@@ -263,7 +263,7 @@ def visualize_infer(results):
         ]
         colors = ["#66b3ff", "#ff9999"]
 
-        ax.pie(sizes, labels=labels, colors=colors, autopct="%1.1f%%", startangle=90, textprops={"fontsize": 9})
+        ax.pie(sizes, labels=labels, colors=colors, autopct="%1.1f%%", startangle=90, textprops={"fontsize": 13})
         ax.set_title(name)
 
     plt.tight_layout()

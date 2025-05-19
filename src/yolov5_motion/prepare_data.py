@@ -10,8 +10,8 @@ import cv2
 import numpy as np
 
 NUM_SAMPLES = 100
-OUTPUT_DIR = "/home/jovyan/p.kudrevatyh/bg_subtraction"
-CONTROL_MODE = "bg_subtraction"
+OUTPUT_DIR = "/home/jovyan/p.kudrevatyh/canny"
+CONTROL_MODE = "canny"
 SHOULD_PROCESS_VIDEOS = True
 
 

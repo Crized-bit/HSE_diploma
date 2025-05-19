@@ -111,8 +111,32 @@ def create_control_image(frames_stack: list, cur_image: np.ndarray, mode: str = 
 
         return control_image
 
+    elif mode == "canny":
+        # Canny edge detection
+        cur_gray = cv2.cvtColor(cur_image, cv2.COLOR_RGB2GRAY)
+        # Создание первого канала - Canny
+        edges = cv2.Canny(cur_gray, threshold1=50, threshold2=150).astype(np.uint8)
+
+        # Вычисление градиентов по X и Y с помощью оператора Собеля
+        sobelx = cv2.Sobel(cur_gray, cv2.CV_64F, 1, 0, ksize=3)
+        sobely = cv2.Sobel(cur_gray, cv2.CV_64F, 0, 1, ksize=3)
+
+        blur = cv2.GaussianBlur(cur_gray, (5, 5), 0)
+        log = cv2.Laplacian(blur, cv2.CV_64F)
+        log_normalized = cv2.normalize(np.abs(log), None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+        # Создание третьего канала - величина градиента
+        magnitude = cv2.magnitude(sobelx, sobely)
+        # Нормализация величины градиента
+        magnitude = cv2.normalize(magnitude, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+        # Объединение трех каналов в одно RGB изображение
+        combined_image = cv2.merge([edges, log_normalized, magnitude])
+
+        return combined_image
+
     else:
-        raise ValueError(f"Unknown mode: {mode}. Valid modes are 'flow', 'difference', 'mixed', 'bg_subtraction'")
+        raise ValueError(f"Unknown mode: {mode}. Valid modes are 'flow', 'difference', 'mixed', 'bg_subtraction', 'canny'")
 
 
 def cxcywh_to_xyxy(bbox):

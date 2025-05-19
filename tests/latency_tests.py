@@ -68,7 +68,7 @@ def test_preprocessing_fps(video_path, num_frames=32):
 
     substractor = cv2.createBackgroundSubtractorKNN(detectShadows=True)
     # Process frames in batches
-    for method in ["flow", "bg_subtraction", "difference"]:
+    for method in ["flow", "bg_subtraction", "difference", "canny"]:
         print(f"\nTesting {method} method...")
 
         # Process in batches to simulate the control stack length
@@ -107,6 +107,27 @@ def test_preprocessing_fps(video_path, num_frames=32):
                     control_image = ((control_image + 255) / 2).astype(np.uint8)
 
                     control_image[mask] = 0
+                
+                elif method == "canny":
+                    cur_gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+                    # Создание первого канала - Canny
+                    edges = cv2.Canny(cur_gray, threshold1=50, threshold2=150).astype(np.uint8)
+
+                    # Вычисление градиентов по X и Y с помощью оператора Собеля
+                    sobelx = cv2.Sobel(cur_gray, cv2.CV_64F, 1, 0, ksize=3)
+                    sobely = cv2.Sobel(cur_gray, cv2.CV_64F, 0, 1, ksize=3)
+
+                    blur = cv2.GaussianBlur(cur_gray, (5, 5), 0)
+                    log = cv2.Laplacian(blur, cv2.CV_64F)
+                    log_normalized = cv2.normalize(np.abs(log), None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+                    # Создание третьего канала - величина градиента
+                    magnitude = cv2.magnitude(sobelx, sobely)
+                    # Нормализация величины градиента
+                    magnitude = cv2.normalize(magnitude, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+                    # Объединение трех каналов в одно RGB изображение
+                    combined_image = cv2.merge([edges, log_normalized, magnitude])
 
                 prev_frame = frame
 
@@ -227,16 +248,32 @@ def test_model_inference_fps(model_configs, input_size=640, num_iterations=100, 
     return results
 
 
-def plot_preprocessing_results(results, output_dir):
+def plot_preprocessing_results(results, output_dir, fontsize_base=16):
     """
-    Plot preprocessing FPS results
-
+    Plot preprocessing FPS results with larger fonts for scientific publications
+    
     Args:
         results: Dict with FPS results for each method
         output_dir: Directory to save plots
+        fontsize_base: Base font size (other sizes will scale accordingly)
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+
+    # Calculate font sizes based on the base size
+    title_size = fontsize_base + 4
+    label_size = fontsize_base + 2
+    tick_size = fontsize_base
+    
+    # Set global font parameters
+    plt.rcParams.update({
+        'font.size': fontsize_base,
+        'axes.titlesize': title_size,
+        'axes.labelsize': label_size,
+        'xtick.labelsize': tick_size,
+        'ytick.labelsize': tick_size,
+        'legend.fontsize': fontsize_base
+    })
 
     # Plot FPS distribution
     plt.figure(figsize=(12, 8))
@@ -251,14 +288,18 @@ def plot_preprocessing_results(results, output_dir):
 
     if data:
         plt.boxplot(data, tick_labels=labels, showmeans=True, showfliers=False)
-        plt.title("Preprocessing FPS Comparison", fontsize=14, fontweight="bold")
-        plt.ylabel("Frames Per Second (FPS)", fontsize=12)
+        plt.title("Preprocessing FPS Comparison", fontsize=title_size, fontweight="bold")
+        plt.ylabel("Frames Per Second (FPS)", fontsize=label_size)
         plt.grid(axis="y", alpha=0.3)
 
-        # # Add mean values
+        # # Uncommented mean values with larger font
         # for i, d in enumerate(data):
         #     mean_val = np.mean(d)
-        #     plt.text(i + 1, mean_val, f"{mean_val:.2f}", horizontalalignment="center", size="small", color="red", weight="semibold")
+        #     plt.text(i + 1, mean_val, f"{mean_val:.2f}", 
+        #             horizontalalignment="center", 
+        #             size=fontsize_base, 
+        #             color="red", 
+        #             weight="semibold")
 
         plt.tight_layout()
         plt.savefig(output_path / "preprocessing_fps_comparison.png", dpi=300)
@@ -277,29 +318,46 @@ def plot_preprocessing_results(results, output_dir):
                     f.write(f"  FPS Values: {','.join([f'{v:.2f}' for v in fps_values])}\n\n")
 
 
-def plot_inference_results(results, output_dir):
+def plot_inference_results(results, output_dir, fontsize_base=16):
     """
-    Plot model inference FPS results
-
+    Plot model inference FPS results with larger fonts for scientific publications
+    
     Args:
         results: Dict with inference results for each model
         output_dir: Directory to save plots
+        fontsize_base: Base font size (other sizes will scale accordingly)
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
+    # Calculate font sizes based on the base size
+    title_size = fontsize_base + 4
+    label_size = fontsize_base + 2
+    tick_size = fontsize_base
+    
+    # Set global font parameters
+    plt.rcParams.update({
+        'font.size': fontsize_base,
+        'axes.titlesize': title_size,
+        'axes.labelsize': label_size,
+        'xtick.labelsize': tick_size,
+        'ytick.labelsize': tick_size,
+        'legend.fontsize': fontsize_base
+    })
+
     # Extract FPS values and model names
     model_names = list(results.keys())
     fps_values = [results[model]["fps"] for model in model_names]
+    
     # Create bar chart for FPS comparison
     plt.figure(figsize=(12, 8))
     plt.boxplot(fps_values, tick_labels=model_names, showmeans=True, showfliers=False)
     # bars = plt.bar(range(len(model_names)), fps_values, width=0.6, yerr=fps_std, capsize=5)
 
-    plt.xlabel("Model Configuration", fontsize=12)
-    plt.ylabel("Frames Per Second (FPS)", fontsize=12)
-    plt.title("Model Inference Speed Comparison", fontsize=14, fontweight="bold")
-    # plt.xticks(range(len(model_names)), model_names, rotation=45, ha="right")
+    plt.xlabel("Model Configuration", fontsize=label_size)
+    plt.ylabel("Frames Per Second (FPS)", fontsize=label_size)
+    plt.title("Model Inference Speed Comparison", fontsize=title_size, fontweight="bold")
+    # plt.xticks(range(len(model_names)), model_names, rotation=45, ha="right", fontsize=tick_size)
     plt.grid(axis="y", alpha=0.3)
     plt.tight_layout()
 
@@ -314,10 +372,10 @@ def plot_inference_results(results, output_dir):
 
     plt.boxplot(latency_ms, tick_labels=model_names, showmeans=True, showfliers=False)
 
-    plt.xlabel("Model Configuration", fontsize=12)
-    plt.ylabel("Inference Latency (ms)", fontsize=12)
-    plt.title("Model Inference Latency Comparison", fontsize=14, fontweight="bold")
-    # plt.xticks(range(len(model_names)), model_names, rotation=45, ha="right")
+    plt.xlabel("Model Configuration", fontsize=label_size)
+    plt.ylabel("Inference Latency (ms)", fontsize=label_size)
+    plt.title("Model Inference Latency Comparison", fontsize=title_size, fontweight="bold")
+    # plt.xticks(range(len(model_names)), model_names, rotation=45, ha="right", fontsize=tick_size)
     plt.grid(axis="y", alpha=0.3)
     plt.tight_layout()
 
@@ -352,11 +410,11 @@ def main():
         },
     ]
 
-    preprocessing_results = test_preprocessing_fps("/home/jovyan/p.kudrevatyh/yolov5_motion/data/videos/uid_vid_00006.mp4", num_frames=32)
-    plot_preprocessing_results(preprocessing_results, output_dir / "preprocessing")
+    # preprocessing_results = test_preprocessing_fps("/home/jovyan/p.kudrevatyh/yolov5_motion/data/videos/uid_vid_00006.mp4", num_frames=32)
+    # plot_preprocessing_results(preprocessing_results, output_dir / "preprocessing")
 
-    # inference_results = test_model_inference_fps(model_configs, num_iterations=300*32)
-    # plot_inference_results(inference_results, output_dir / "inference")
+    inference_results = test_model_inference_fps(model_configs, num_iterations=300*32)
+    plot_inference_results(inference_results, output_dir / "inference")
 
     print(f"\nAll tests completed. Results saved to {output_dir}")
 

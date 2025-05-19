@@ -8,12 +8,12 @@ BASE_PATH = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs"
 
 # Model names to analyze
 MODEL_NAMES = [
-    # "yolov5n/base_model",
+    "yolov5n/base_model",
     "yolov5n/lora",
     "yolov5n/0.2/bg_sub/control_lora + yolo_lora",
     "yolov5n/0.2/difference/control_lora + yolo_lora",
-    "yolov5n/0.2/mixed/control_lora + yolo_lora",
-    "yolov5n/0.2/flow/control_lora + yolo_lora",
+    # "yolov5n/0.2/mixed/control_lora + yolo_lora",
+    # "yolov5n/0.2/flow/control_lora + yolo_lora",
 ]
 
 COLOR_PALETTE = [
@@ -33,10 +33,10 @@ PLOT_BACKGROUND_COLOR = "#F8F9FA"  # Light gray background
 GRID_COLOR = "#E0E0E0"  # Light grid lines
 
 # Font settings for academic presentation
-FONT_SIZE_TITLE = 16
-FONT_SIZE_LABELS = 12
-FONT_SIZE_TICKS = 10
-FONT_SIZE_ANNOTATIONS = 9
+FONT_SIZE_TITLE = 18
+FONT_SIZE_LABELS = 14
+FONT_SIZE_TICKS = 12
+FONT_SIZE_ANNOTATIONS = 14
 
 
 def load_metrics(model_name):
