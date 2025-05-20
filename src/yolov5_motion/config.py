@@ -2,7 +2,7 @@ import json
 from dataclasses import asdict
 from dataclasses import dataclass, field
 from typing import Optional
-from yolov5_motion.models.blocks import ControlNetModel, ControlNetModelLora
+from yolov5_motion.models.blocks import ControlNetModelShort, ControlNetModelLora, ControlNetModelFull
 
 
 class EnhancedJSONEncoder(json.JSONEncoder):
@@ -27,7 +27,7 @@ class DataConfig:
 
 @dataclass
 class ModelConfig:
-    model_cls: type = ControlNetModelLora
+    model_cls: type = ControlNetModelFull
     yolo_weights: str = "/home/jovyan/p.kudrevatyh/yolov5n.pt"
     yolo_cfg: str = "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5n.yaml"
     controlnet_weights: Optional[str] = None

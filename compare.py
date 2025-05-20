@@ -8,18 +8,19 @@ BASE_PATH = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs"
 
 # Model names to analyze
 MODEL_NAMES = [
-    "yolov5n/base_model",
+    # "yolov5n/base_model",
     "yolov5n/lora",
-    "yolov5n/0.2/bg_sub/control_lora + yolo_lora",
+    # "yolov5n/0.2/bg_sub/control_lora + yolo_lora",
     "yolov5n/0.2/difference/control_lora + yolo_lora",
-    "yolov5n/0.2/mixed/control_lora + yolo_lora",
+    # "yolov5n/0.2/mixed/control_lora + yolo_lora",
+    # "yolov5n/0.2/canny/control_lora + yolo_lora",
     # "yolov5n/0.2/flow/control_lora + yolo_lora",
 ]
 
 COLOR_PALETTE = [
-    "#1D7B92",  # Teal Blue
+    # "#1D7B92",  # Teal Blue
     "#F3863F",  # Bright Orange
-    "#5D4A98",  # Royal Purple
+    # "#5D4A98",  # Royal Purple
     "#2E7D32",  # Forest Green
     "#C62828",  # Deep Red
 ]
@@ -35,7 +36,7 @@ GRID_COLOR = "#E0E0E0"  # Light grid lines
 # Font settings for academic presentation
 FONT_SIZE_TITLE = 18
 FONT_SIZE_LABELS = 14
-FONT_SIZE_TICKS = 12
+FONT_SIZE_TICKS = 16
 FONT_SIZE_ANNOTATIONS = 14
 
 
@@ -308,11 +309,13 @@ def plot_simple_histograms():
         # Save and display
         output_path = os.path.join(BASE_PATH, f"{metric.replace('@', '_')}_histogram.png")
         plt.tight_layout()
+        plt.rc('xtick', labelsize=FONT_SIZE_TICKS)    # fontsize of the tick labels
+        plt.rc('ytick', labelsize=FONT_SIZE_TICKS)
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         print(f"Histogram saved: {output_path}")
         plt.show()
 
 
 if __name__ == "__main__":
-    plot_metrics()
-    # plot_simple_histograms()
+    # plot_metrics()
+    plot_simple_histograms()

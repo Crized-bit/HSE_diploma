@@ -126,7 +126,7 @@ class Trainer:
 
         # Setup optimizer
         self.optimizer = self._create_optimizer()
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, my_config.training.epochs)
+        # self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, my_config.training.epochs)
         # Resume training if specified
         self.start_epoch = 0
         if my_config.training.resume:
@@ -334,7 +334,7 @@ class Trainer:
                     self.writer.add_scalar("train/lr", param_group["lr"], self.global_step)
 
             self.global_step += 1
-        self.scheduler.step()
+        # self.scheduler.step()
         # Compute average metrics for the epoch
         num_batches = len(self.dataloaders["train"])
         avg_loss = epoch_loss / num_batches

@@ -13,7 +13,6 @@ from models.yolo import Detect, Segment, Model as YOLOv5Model  # type: ignore
 from utils.general import check_img_size  # type: ignore
 from utils.torch_utils import model_info  # type: ignore
 
-from yolov5_motion.models.blocks import ControlNetModel
 from yolov5_motion.config import my_config
 
 

@@ -14,13 +14,16 @@ from utils.general import check_img_size  # type: ignore
 
 
 class ResConv(nn.Module):
-    def __init__(self, c1, c2):
+    def __init__(self, c1, c2, should_init_zero=False):
         super().__init__()
         self.c1 = c1
         self.c2 = c2
         self.conv = nn.Conv2d(c1, c2, kernel_size=3, padding=1, stride=1)
         self.bn = nn.BatchNorm2d(c2)
         self.act = nn.SiLU()
+        if should_init_zero:
+            nn.init.zeros_(self.conv.weight)
+            nn.init.zeros_(self.conv.bias)
 
     def forward(self, x):
         if self.c1 == self.c2:
@@ -29,7 +32,7 @@ class ResConv(nn.Module):
             return self.act(self.bn(self.conv(x)))
 
 
-class ControlNetModel(nn.Module):
+class ControlNetModelShort(nn.Module):
     def __init__(self, yolo_model: YOLOv5Model, should_share_weights: bool):
         super().__init__()
 
@@ -250,6 +253,110 @@ class ControlNetModelLora(nn.Module):
         self.nodes.eval()
         self.convs.train(mode)
         self.start_conv.train(mode)
+
+
+class ControlNetModelFull(nn.Module):
+    def __init__(self, yolo_model: YOLOv5Model, **kwargs):
+        super().__init__()
+        # Clone YOLOv5 backbone structure
+        from yolov5_motion.config import my_config
+
+        nodes = nn.ModuleList([module for module in yolo_model.model[:10]])
+
+        initial_num_ch = nodes[0].conv.out_channels
+        initial_nub_blocks = len(yolo_model.model[:10][2].m)
+
+        self.nodes = nn.ModuleList(
+            [
+                Conv(c1=3, c2=initial_num_ch, k=6, s=2, p=2),
+                Conv(c1=initial_num_ch, c2=initial_num_ch * 2, k=3, s=2, p=1),
+                C3(c1=initial_num_ch * 2, c2=initial_num_ch * 2, n=initial_nub_blocks),
+                Conv(c1=initial_num_ch * 2, c2=initial_num_ch * 4, k=3, s=2, p=1),
+                C3(c1=initial_num_ch * 4, c2=initial_num_ch * 4, n=initial_nub_blocks * 2),
+                Conv(c1=initial_num_ch * 4, c2=initial_num_ch * 8, k=3, s=2, p=1),
+                C3(c1=initial_num_ch * 8, c2=initial_num_ch * 8, n=initial_nub_blocks * 3),
+                Conv(c1=initial_num_ch * 8, c2=initial_num_ch * 16, k=3, s=2, p=1),
+                C3(c1=initial_num_ch * 16, c2=initial_num_ch * 16, n=initial_nub_blocks),
+                SPPF(c1=initial_num_ch * 16, c2=initial_num_ch * 16),
+            ]
+        )
+
+        # Convs for ControlNet
+        self.convs = nn.ModuleList(
+            [
+                nn.Sequential(ResConv(initial_num_ch * 4, initial_num_ch * 4, should_init_zero=True)),
+                nn.Sequential(
+                    nn.MaxPool2d(kernel_size=2, stride=2), ResConv(initial_num_ch * 4, initial_num_ch * 4, should_init_zero=True)
+                ),
+                nn.Sequential(ResConv(initial_num_ch * 8, initial_num_ch * 8, should_init_zero=True)),
+                nn.Sequential(ResConv(initial_num_ch * 8, initial_num_ch * 8, should_init_zero=True)),
+                nn.Sequential(
+                    nn.Tanh(),
+                ),
+                nn.Sequential(
+                    nn.Tanh(),
+                ),
+            ]
+        )
+
+        self.start_conv = ResConv(my_config.model.num_input_channels, 3, should_init_zero=True)
+
+    def forward(self, intial_img, x):
+
+        x = self.start_conv(x)
+        x = x + intial_img
+        # Convs
+        x = self.nodes[0](x)
+        x = self.nodes[1](x)
+        # C3 + Res Con
+        x = self.nodes[2](x)
+        # Conv
+        x = self.nodes[3](x)
+
+        ####### 17 out #####
+        conv_17_out = x + self.convs[0](x)
+        ####################
+
+        # C3
+        x = self.nodes[4](x)
+        #####################
+
+        ####### 18 out #####
+        conv_18_out = self.convs[1](x)
+        ####################
+
+        # Conv
+        x = self.nodes[5](x)
+
+        ####### 19 out #####
+        conv_19_out = x + self.convs[2](x)
+        ####################
+
+        x = self.nodes[6](x)
+
+        ####### 20 out #####
+        conv_20_out = x + self.convs[3](x)
+        ####################
+
+        x = self.nodes[7](x)
+
+        x = self.nodes[8](x)
+        ####### 22 out #####
+        conv_22_out = self.convs[4](x)
+        ####################
+
+        x = self.nodes[9](x)
+
+        ####### 23 out #####
+        conv_23_out = self.convs[5](x)
+        ####################
+        return (conv_17_out, conv_18_out, conv_19_out, conv_20_out, conv_22_out, conv_23_out)
+
+    def train(self, mode: bool = True):
+        for param in self.parameters():
+            param.requires_grad = True
+
+        return super().train(mode)
 
 
 def test_control_net():
