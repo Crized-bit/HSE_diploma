@@ -16,7 +16,7 @@ class EnhancedJSONEncoder(json.JSONEncoder):
 
 @dataclass
 class DataConfig:
-    preprocessed_dir: str = "/home/jovyan/p.kudrevatyh/canny"
+    preprocessed_dir: str = "/home/jovyan/p.kudrevatyh/difference"
     annotations_dir: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/data/annotations"
     splits_file: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/data/splits.json"
     output_dir: str = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs/yolov5n"
@@ -27,7 +27,7 @@ class DataConfig:
 
 @dataclass
 class ModelConfig:
-    model_cls: type = ControlNetModelFull
+    model_cls: type = ControlNetModelLora
     yolo_weights: str = "/home/jovyan/p.kudrevatyh/yolov5n.pt"
     yolo_cfg: str = "/home/jovyan/p.kudrevatyh/yolov5/models/yolov5n.yaml"
     controlnet_weights: Optional[str] = None
@@ -54,7 +54,7 @@ class DetectionConfig:
 
 @dataclass
 class TrainingConfig:
-    checkpoint_name: str = "0.2/canny/control_lora + yolo_lora"
+    checkpoint_name: str = "0.2/difference/control_lora + yolo_lora"
     epochs: int = 200
     batch_size: int = 64
     val_batch_size: int = 32

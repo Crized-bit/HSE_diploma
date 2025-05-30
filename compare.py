@@ -10,15 +10,15 @@ BASE_PATH = "/home/jovyan/p.kudrevatyh/yolov5_motion/a100_training_outputs"
 MODEL_NAMES = [
     # "yolov5n/base_model",
     "yolov5n/lora",
-    # "yolov5n/0.2/bg_sub/control_lora + yolo_lora",
+    "yolov5n/0.2/bg_sub/control_lora + yolo_lora",
     "yolov5n/0.2/difference/control_lora + yolo_lora",
-    # "yolov5n/0.2/mixed/control_lora + yolo_lora",
+    "yolov5n/0.2/mixed/control_lora + yolo_lora",
     # "yolov5n/0.2/canny/control_lora + yolo_lora",
     # "yolov5n/0.2/flow/control_lora + yolo_lora",
 ]
 
 COLOR_PALETTE = [
-    # "#1D7B92",  # Teal Blue
+    "#1D7B92",  # Teal Blue
     "#F3863F",  # Bright Orange
     # "#5D4A98",  # Royal Purple
     "#2E7D32",  # Forest Green
